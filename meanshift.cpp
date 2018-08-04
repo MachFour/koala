@@ -112,15 +112,4 @@ namespace meanShift {
             std::sort(begin(), end(), [](Cluster &c1, Cluster &c2) -> bool { return c1.size() < c2.size(); });
         }
     }
-
-    Point point1D(int label, double x) {
-        return {label, {x}};
-    }
-    Point point2D(int label, double x, double y) {
-        return {label, {x, y}};
-    }
-    Point point3D(int label, double x, double y, double z) {
-        return {label, {x, y, z}};
-    }
-
 }

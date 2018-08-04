@@ -40,8 +40,6 @@ namespace meanShift {
             void sortBySize(bool descending=true);
     };
 
-    // convenience function to return 1 dimensional point
-    Point point1D(int label, double x);
     double gaussianKernel(double, double);
 
     ClusterList cluster(const std::vector<Point> &, double, kernelFunc = gaussianKernel);

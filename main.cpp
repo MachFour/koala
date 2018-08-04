@@ -82,7 +82,13 @@ int main(int argc, char ** argv) {
             continue;
         }
         drawCC(allComponents, labels, stats, centroids, i);
-        yCentroids.push_back(meanShift::point1D(i, centroids.at<double>(i, 1)));
+
+        double centroidY = centroids.at<double>(i, 1);
+        double height = static_cast<double>(stats.at<int>(i, cv::CC_STAT_HEIGHT));
+        double width  = static_cast<double>(stats.at<int>(i, cv::CC_STAT_WIDTH));
+        yCentroids.push_back(meanShift::Point {i, {centroidY}});
+        // include height and width in clustering decision
+        //yCentroids.push_back(meanShift::Point {i, {centroidY, height, width}});
     }
     showImage(allComponents);
 
@@ -115,7 +121,7 @@ int main(int argc, char ** argv) {
             sumHeight += height;
             sumSqHeight += height*height;
             heights.push_back(height);
-            ccLabelsInCluster.push_back(meanShift::point1D(point.label, height));
+            ccLabelsInCluster.push_back(meanShift::Point {point.label, {static_cast<double>(height)}});
         }
         // actually should use median height
         // TODO justify bandwidth parameter
