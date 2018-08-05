@@ -9,40 +9,72 @@
 #include <vector>
 #include <algorithm>
 #include <functional>
+#include "ccomponent.h"
 
 namespace meanShift {
     typedef std::vector<double> position;
     typedef double (*kernelFunc)(double, double);
-
-    struct Point {
-        int label;
-        position pos;
-    };
-    struct Cluster {
-        position mode;
-        std::vector<Point> original_points;
-        std::vector<Point> shifted_points;
-
-        std::size_t size() const {
-            return original_points.size();
-        }
-        std::vector<int> getLabels() const {
-            std::vector<int> labels;
-            for (const Point& p : original_points) {
-                labels.push_back(p.label);
-            }
-            return labels;
-        }
-    };
-
-    class ClusterList : public std::vector<Cluster> {
-        public:
-            void sortBySize(bool descending=true);
-    };
-
     double gaussianKernel(double, double);
 
-    ClusterList cluster(const std::vector<Point> &, double, kernelFunc = gaussianKernel);
+    template<typename T>
+    struct Point {
+        T data;
+        position pos;
+    };
+
+    template<typename T>
+    class Cluster {
+    public:
+        Cluster(position mode) : mode(mode), size(0) {};
+
+        void addPoint(const Point<T> point, const Point<T> shifted) {
+            original_points.push_back(point);
+            shifted_points.push_back(shifted);
+            size++;
+        }
+
+        // return copy
+        position getMode() const {
+            return position(mode);
+        }
+
+        int getSize() const {
+            return size;
+        }
+        std::vector<T> getData() const {
+            std::vector<T> getData;
+            for (const Point<T>& p : original_points) {
+                getData.push_back(p.data);
+            }
+            return getData;
+        }
+
+    private:
+        position mode;
+        int size;
+        std::vector<Point<T>> original_points;
+        std::vector<Point<T>> shifted_points;
+
+    };
+
+    template <typename T>
+    class ClusterList : public std::vector<Cluster<T>> {
+        public:
+            void sortBySize(bool descending = true) {
+                // sort ensures that the compare function resturns true on any two successive elements
+                auto compareFunc = descending ?
+                          [](Cluster<T> &c1, Cluster<T> &c2) -> bool { return c1.getSize() > c2.getSize(); }
+                        : [](Cluster<T> &c1, Cluster<T> &c2) -> bool { return c1.getSize() < c2.getSize(); };
+                std::sort(this->begin(), this->end(), compareFunc);
+            }
+    };
+
+    template <typename T>
+    ClusterList<T> cluster(const std::vector<Point<T>>&, double, kernelFunc = gaussianKernel);
+
 }
+
+using ccCluster = meanShift::Cluster<CComponent>;
+using ccClusterList = meanShift::ClusterList<CComponent>;
 
 #endif //MEANSHIFT_H

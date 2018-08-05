@@ -7,18 +7,16 @@
 
 #include <opencv2/opencv.hpp>
 #include "meanshift.h"
+#include "ccomponent.h"
 
 using Mat = cv::Mat;
-using Cluster = meanShift::Cluster;
-using ClusterList = meanShift::ClusterList;
 template <typename T>
 using vector = std::vector<T>;
-
 
 void showImage(const Mat& img);
 int saveOrShowImage(const Mat&, const char *);
 // image, labels, stats, centroids
-void drawCC(Mat&, const Mat&, const Mat&, const Mat&, int which, cv::Scalar colour = cv::Scalar(255, 255, 255));
+void drawCC(Mat&, const CComponent&, cv::Scalar colour = cv::Scalar(255, 255, 255));
 
 std::string type2str(int type);
 Mat structuringElement(int size, cv::MorphShapes shape);
@@ -28,10 +26,8 @@ const static int STDDEV_WIN = 32;
 const static cv::Size STDDEV_WIN_SIZE = cv::Size(STDDEV_WIN, STDDEV_WIN);
 const static double VARIANCE_THRESHOLD = 0.1;
 
-// image, labels, stats, centroids, clustersByCentroid
-void showCentroidClusters(const Mat&, const Mat&, const Mat&, const Mat&, const vector<Cluster>&);
-// image, labels, stats, centroids, clustersByCentroid
-void showRowBounds(const Mat&, const Mat&, const Mat&, const Mat&, const vector<Cluster>&);
+void showCentroidClusters(const Mat&, const vector<ccCluster>&);
+void showRowBounds(const Mat&, const vector<ccCluster>&);
 void showRects(const Mat&, const vector<cv::Rect>&);
 
 int findMedian(vector<int> numbers);

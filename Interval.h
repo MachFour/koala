@@ -13,11 +13,11 @@ using vector = std::vector<T>;
 
 class Interval {
 public:
-    // how to decide whether two line segments 'overlap' when using a fudge factor
-    enum OverlapType {
-          MIN // measure closeness relative to shorter of the two intervals
-        , MAX // measure closeness relative to larger of the two intervals
-        , AVG // measure closeness relative to average length of the two intervals
+    // how to apply a length expansion when determining whether two line segments are close
+    enum ExpandType {
+          MIN // use the shorter interval's length to expand
+        , MAX // use the longer interval's length to expand
+        , AVG // use the average of the two intervals' lengths to expand
     };
 
     Interval(int label, double point1, double point2) :
@@ -29,7 +29,9 @@ public:
 
     // intervals vector needs to be copied because it's sorted
     static void groupCloseIntervals(vector<Interval> intervals, vector<vector<Interval>> &partitions, double expansion);
-    static bool areClose(const Interval &i1, const Interval &i2, double expand = 1.0, OverlapType method = AVG);
+    static bool areClose(const Interval &, const Interval&, double expand = 1.0, ExpandType method = AVG);
+    static bool closeToAny(const Interval &, const vector<Interval> &others, double expand = 1.0,
+            ExpandType method = AVG);
 
 private:
     int label;

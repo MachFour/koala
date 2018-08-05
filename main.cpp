@@ -7,6 +7,7 @@
 #include "reference.h"
 #include "meanshift.h"
 #include "Interval.h"
+#include "ccomponent.h"
 //#include <opencv2/ximgproc.hpp>
 
 int main(int argc, char ** argv) {
@@ -70,31 +71,42 @@ int main(int argc, char ** argv) {
     Mat centroids;
     int nlabels = cv::connectedComponentsWithStats(binarised, labels, stats, centroids);
 
+    vector<CComponent> allCCs;
+
+    for (int label = 0; label < nlabels; ++label) {
+        CComponent cc;
+        cc.label = label;
+        cc.left = stats.at<int>(label, cv::CC_STAT_LEFT);
+        cc.top = stats.at<int>(label, cv::CC_STAT_TOP);
+        cc.height = stats.at<int>(label, cv::CC_STAT_HEIGHT);
+        cc.width = stats.at<int>(label, cv::CC_STAT_WIDTH);
+        cc.area = stats.at<int>(label, cv::CC_STAT_AREA);
+        cc.centroidX = centroids.at<double>(label, 0);
+        cc.centroidY = centroids.at<double>(label, 1);
+        allCCs.push_back(cc);
+    }
+
     showImage(image);
     showImage(open);
     showImage(binarised);
 
-    vector<meanShift::Point> yCentroids;
+    vector<meanShift::Point<CComponent>> yCentroids;
     Mat allComponents = binarised.clone();
     int minArea = 200;
-    for (int i = 0; i < nlabels; ++i) {
-        if (stats.at<int>(i, cv::CC_STAT_AREA) < minArea) {
-            continue;
+    for (CComponent& cc: allCCs) {
+        if (cc.area >= minArea) {
+            drawCC(allComponents, cc);
+            //yCentroids.push_back(meanShift::Point {i, {centroidY}});
+            // include height and width in clustering decision
+            double ccHeight = static_cast<double>(cc.height);
+            yCentroids.push_back(meanShift::Point<CComponent> {cc, {cc.centroidY, ccHeight}});
         }
-        drawCC(allComponents, labels, stats, centroids, i);
-
-        double centroidY = centroids.at<double>(i, 1);
-        double height = static_cast<double>(stats.at<int>(i, cv::CC_STAT_HEIGHT));
-        double width  = static_cast<double>(stats.at<int>(i, cv::CC_STAT_WIDTH));
-        yCentroids.push_back(meanShift::Point {i, {centroidY}});
-        // include height and width in clustering decision
-        //yCentroids.push_back(meanShift::Point {i, {centroidY, height, width}});
     }
     showImage(allComponents);
 
 
     // TODO justify bandwidth parameter
-    ClusterList ccClusters = meanShift::cluster(yCentroids, 25);
+    auto ccClusters = meanShift::cluster(yCentroids, 25);
     /*
     // show cluster modes
     for (Cluster& c : centroidClusters) {
@@ -109,35 +121,39 @@ int main(int argc, char ** argv) {
     /*
      * Within each cluster above, cluster again based on bounding box height, and keep only the largest cluster
      */
-    vector<Cluster> clustersByCentroid/*(centroidClusters.size())*/;
-    for (Cluster& ithCluster : ccClusters) {
-        vector<meanShift::Point> ccLabelsInCluster/*(centroidClusters.size())*/;
+    vector<ccCluster> clustersByCentroid/*(centroidClusters.getSize())*/;
+    for (ccCluster& ithCluster : ccClusters) {
+        vector<meanShift::Point<CComponent>> ccLabelsInCluster/*(centroidClusters.getSize())*/;
         // use to find median of cluster height
         vector<int> heights;
-        int sumHeight = 0;
-        int sumSqHeight = 0;
-        for (meanShift::Point&  point : ithCluster.shifted_points) {
-            auto height = stats.at<int>(point.label, cv::CC_STAT_HEIGHT);
-            sumHeight += height;
-            sumSqHeight += height*height;
-            heights.push_back(height);
-            ccLabelsInCluster.push_back(meanShift::Point {point.label, {static_cast<double>(height)}});
+        long sumHeight = 0;
+        long sumSqHeight = 0;
+        for (CComponent& cc : ithCluster.getData()) {
+            sumHeight += cc.height;
+            sumSqHeight += cc.height*cc.height;
+            heights.push_back(cc.height);
+            double heightD = static_cast<double>(cc.height);
+            double widthD = static_cast<double>(cc.width);
+            ccLabelsInCluster.push_back(meanShift::Point<CComponent> {cc, {heightD}});
         }
         // actually should use median height
         // TODO justify bandwidth parameter
         // should be scale invariant! -> mean, median, mode?
 
-        double stddev = sqrt((1.0*(sumSqHeight - sumHeight*sumHeight))/heights.size());
-        double mean = (1.0*sumHeight)/heights.size();
-        double median = findMedian(heights);
+        size_t n = heights.size();
+        double avgHeight = sumHeight/(double)n;
+        double stddev = sqrt((1.0*sumSqHeight)/n - avgHeight*avgHeight);
+        //double mean = (1.0*sumHeight)/heights.size();
+        //double median = findMedian(heights);
         double bwMultiplier = 1.0;
-        auto heightClusters = meanShift::cluster(ccLabelsInCluster, stddev*bwMultiplier);
+        ccClusterList heightClusters = meanShift::cluster<CComponent>(ccLabelsInCluster, stddev*bwMultiplier);
         heightClusters.sortBySize();
+        ccCluster biggest = heightClusters[0];
         clustersByCentroid.push_back(heightClusters[0]);
     }
 
-    showCentroidClusters(binarised, labels, stats, centroids, clustersByCentroid);
-    showRowBounds(binarised, labels, stats, centroids, clustersByCentroid);
+    showCentroidClusters(binarised, clustersByCentroid);
+    showRowBounds(binarised, clustersByCentroid);
 
     /*
      * For each row / centroid cluster:
@@ -150,15 +166,15 @@ int main(int argc, char ** argv) {
 
     vector<cv::Rect> overlappingCCRects;
     vector<size_t> rectsPerRow;
-    for (Cluster& c: clustersByCentroid) {
+    for (ccCluster& c: clustersByCentroid) {
         vector<vector<Interval>> overlapping;
         vector<Interval> intervals;
-        for (int label : c.getLabels()) {
-            double left = static_cast<double>(stats.at<int>(label, cv::CC_STAT_LEFT));
-            double width = static_cast<double>(stats.at<int>(label, cv::CC_STAT_WIDTH));
-            intervals.push_back(Interval(label, left, left+width));
+        for (CComponent cc : c.getData()) {
+            double left = static_cast<double>(cc.left);
+            double width = static_cast<double>(cc.width);
+            intervals.push_back(Interval(cc.label, left, left+width));
         }
-        Interval::groupCloseIntervals(intervals, overlapping, 2.0);
+        Interval::groupCloseIntervals(intervals, overlapping, 1.5);
         // make rects for each partition
         for (auto& partition : overlapping) {
             int minTop = image.rows; // >= anything inside image
@@ -166,11 +182,12 @@ int main(int argc, char ** argv) {
             int maxBottom = 0; // <= smaller than anything inside image
             int maxRight = 0; // <= smaller than anything inside image
             for (Interval& iv : partition) {
+                // TODO avoid indexing back into global list
                 int label = iv.getLabel();
-                int top = stats.at<int>(label, cv::CC_STAT_TOP);
-                int height = stats.at<int>(label, cv::CC_STAT_HEIGHT);
-                int width = stats.at<int>(label, cv::CC_STAT_WIDTH);
-                int left = stats.at<int>(label, cv::CC_STAT_LEFT);
+                int top = allCCs[label].top;
+                int height = allCCs[label].height;
+                int width = allCCs[label].width;
+                int left = allCCs[label].left;
                 minTop = cv::min(top, minTop);
                 minLeft = cv::min(left, minLeft);
                 maxBottom = cv::max(top+height, maxBottom);

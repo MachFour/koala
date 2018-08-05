@@ -3,7 +3,6 @@
  * Taken (and modified) from https://github.com/mattnedrich/MeanShift_cpp (licensed under MIT license)
  */
 
-//#include <stdio.h>
 #include <math.h>
 #include "meanshift.h"
 
@@ -23,13 +22,18 @@ namespace meanShift {
         return sqrt(meanShift::euclidean_distance_sqr(a, b));
     }
 
-    double gaussianKernel(double distance, double kernel_bandwidth) {
-        double temp = exp(-0.5 * (distance * distance) / (kernel_bandwidth * kernel_bandwidth));
-        return temp;
+    // MAKE SURE bandwidth > 0
+    double gaussianKernel(double distance, double bandwidth) {
+        return exp(-0.5 * (distance * distance) / (bandwidth * bandwidth));
     }
 
-    void shift_point(const Point &p, const std::vector<Point> &points, double kernel_bandwidth, Point &shifted_point, kernelFunc k) {
+    template <typename T>
+    void shift_point(const Point<T> &p, const std::vector<Point<T>> &points, double kernel_bandwidth, Point<T> &shifted_point, kernelFunc k) {
         shifted_point = p;
+        if (points.size() == 1 || kernel_bandwidth == 0) {
+            // nothing should be done
+            return;
+        }
         for (unsigned dim = 0; dim < shifted_point.pos.size(); dim++) {
             shifted_point.pos[dim] = 0;
         }
@@ -43,19 +47,25 @@ namespace meanShift {
             total_weight += weight;
         }
 
-        const double total_weight_inv = 1.0 / total_weight;
-        for (unsigned i = 0; i < shifted_point.pos.size(); i++) {
-            shifted_point.pos[i] *= total_weight_inv;
+        if (total_weight == 0) {
+            printf("shift_point: warning, total weight was 0\n");
+            // would get NaNs if continuing
+        } else {
+            const double total_weight_inv = 1.0 / total_weight;
+            for (unsigned i = 0; i < shifted_point.pos.size(); i++) {
+                shifted_point.pos[i] *= total_weight_inv;
+            }
         }
     }
 
 
-    std::vector<Point> meanshift(const std::vector<Point> &points, double bandwidth, kernelFunc kernel, double EPSILON = 0.00001) {
+    template <typename T>
+    std::vector<Point<T>> meanshift(const std::vector<Point<T>> &points, double bandwidth, kernelFunc kernel, double EPSILON = 0.00001) {
+        std::vector<Point<T>> shifted_points = points;
         const auto EPSILON_SQR = EPSILON * EPSILON;
         std::vector<bool> stop_moving(points.size(), false);
-        std::vector<Point> shifted_points = points;
         double max_shift_distance;
-        Point point_new;
+        Point<T> point_new;
         do {
             max_shift_distance = 0;
             for (unsigned i = 0; i < points.size(); i++) {
@@ -77,39 +87,33 @@ namespace meanShift {
         return shifted_points;
     }
 
-    ClusterList makeCluster(const std::vector<Point> &points, const std::vector<Point> &shifted_points) {
-        ClusterList clusters;
+    template <typename T>
+    ClusterList<T> makeCluster(const std::vector<Point<T>> &points, const std::vector<Point<T>> &shifted_points) {
+        ClusterList<T> clusters;
         for (unsigned i = 0; i < shifted_points.size(); i++) {
             unsigned c = 0;
             // find cluster to add current point to
-            while (c < clusters.size() && euclidean_distance(shifted_points[i].pos, clusters[c].mode) > CLUSTER_EPSILON) {
+            while (c < clusters.size() && euclidean_distance(shifted_points[i].pos, clusters[c].getMode()) > CLUSTER_EPSILON) {
                 c++;
             }
             if (c == clusters.size()) {
                 // make new cluster
-                Cluster clus;
-                clus.mode = shifted_points[i].pos;
-                clusters.push_back(clus);
+                clusters.push_back(ccCluster {shifted_points[i].pos});
             }
-            clusters[c].original_points.push_back(points[i]);
-            clusters[c].shifted_points.push_back(shifted_points[i]);
+            clusters[c].addPoint(points[i], shifted_points[i]);
         }
         return clusters;
     }
 
-    ClusterList cluster(const std::vector<Point> &points, double kernel_bandwidth, kernelFunc k) {
+    template <typename T>
+    ClusterList<T> cluster(const std::vector<Point<T>> &points, double kernel_bandwidth, kernelFunc k) {
         auto shifted_points = meanshift(points, kernel_bandwidth, k);
         auto cluster = makeCluster(points, shifted_points);
-        // sort by cluster size, in *descending* order
+        // sort by cluster getSize, in *descending* order
         return cluster;
     }
 
-    void ClusterList::sortBySize(bool descending) {
-        if (descending) {
-            // sort ensures that the compare function resturns true on any two successive elements
-            std::sort(begin(), end(), [](Cluster &c1, Cluster &c2) -> bool { return c1.size() > c2.size(); });
-        } else {
-            std::sort(begin(), end(), [](Cluster &c1, Cluster &c2) -> bool { return c1.size() < c2.size(); });
-        }
-    }
+    // need to instantiate types that will be used
+    template ClusterList<CComponent> meanShift::cluster<CComponent>(const std::vector<Point<CComponent>>&, double, kernelFunc);
 }
+

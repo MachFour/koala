@@ -7,17 +7,31 @@
 #include "Interval.h"
 
 
-bool Interval::areClose(const Interval &i1, const Interval &i2, double expand, OverlapType method) {
+bool Interval::areClose(const Interval &i1, const Interval &i2, double expand, ExpandType method) {
     double dist = distance(i1.midpoint, i2.midpoint);
+    double longerHL = fmax(i1.halflength, i2.halflength);
+    double shorterHL = fmin(i1.halflength, i2.halflength);
     switch (method) {
         case MIN:
-            return dist < 2*fmin(i1.halflength, i2.halflength)*expand;
+            return dist < longerHL + shorterHL*expand*2;
         case MAX:
-            return dist < 2*fmax(i1.halflength, i2.halflength)*expand;
+            return dist < longerHL*expand*2 + shorterHL;
         case AVG:
         default:
-            return dist < (i1.halflength + i2.halflength)*expand;
+            return dist < longerHL*expand + shorterHL*expand;
     }
+}
+
+bool Interval::closeToAny(const Interval &one, const vector<Interval> &others, double expand, ExpandType method) {
+    bool close = false;
+    for (const Interval& other : others) {
+        close |= areClose(one, other, expand, method);
+        if (close) {
+            // don't need to check others
+            break;
+        }
+    }
+    return close;
 }
 
 void Interval::groupCloseIntervals(vector<Interval> intervals, vector<vector<Interval>> &partitions, double expansion) {
@@ -36,7 +50,8 @@ void Interval::groupCloseIntervals(vector<Interval> intervals, vector<vector<Int
         currentPartition.push_back(intervals[i]);
         // find how many subsequent intervals overlap
         // make sure not to skip over the i+1ths interval if it doesn't overlap
-        for (; i+1 < intervals.size() && areClose(intervals[i], intervals[i + 1], expansion, MIN); ++i) {
+        for (; i+1 < intervals.size() && closeToAny(intervals[i + 1], currentPartition, expansion, MIN); ++i) {
+            // TODO could interval i+1 be close to a previous interval in the current partition but not interval i?
             currentPartition.push_back(intervals[i+1]);
         }
     }

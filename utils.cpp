@@ -5,12 +5,13 @@
 #include <vector>
 #include <algorithm>
 #include "reference.h"
+#include "ccomponent.h"
 
-void drawCC(Mat& img, const Mat& labels, const Mat& stats, const Mat& centroids, int which, cv::Scalar colour) {
+void drawCC(Mat& img, const CComponent& cc, cv::Scalar colour) {
     //int area = stats.at<int>(which, cv::CC_STAT_AREA);
     //int centroidX = static_cast<int>(centroids.at<double>(which, 0));
     //int centroidY = static_cast<int>(centroids.at<double>(which, 1));
-    //std::cout << "label " << i << std::endl;
+    //std::cout << "data " << i << std::endl;
     //std::cout << "area: " << area << std::endl;
     //std::cout << "height: " << height << std::endl;
     //std::cout << "width: " << width << std::endl;
@@ -22,13 +23,9 @@ void drawCC(Mat& img, const Mat& labels, const Mat& stats, const Mat& centroids,
     Mat ithComponent;
     cv::compare(labels, which, ithComponent, cv::CMP_EQ);
      */
-    //cv::drawMarker(img, cv::Point(centroidX, centroidY), /*colour=*/255, cv::MARKER_TILTED_CROSS, /*size=*/20, /*thickness=*/3);
+    //cv::drawMarker(img, cv::Point(centroidX, centroidY), /*colour=*/255, cv::MARKER_TILTED_CROSS, /*getSize=*/20, /*thickness=*/3);
     //int thickness = static_cast<int>(1+log(area));
-    int height = stats.at<int>(which, cv::CC_STAT_HEIGHT);
-    int width = stats.at<int>(which, cv::CC_STAT_WIDTH);
-    int top = stats.at<int>(which, cv::CC_STAT_TOP);
-    int left = stats.at<int>(which, cv::CC_STAT_LEFT);
-    cv::rectangle(img, cv::Point(left, top), cv::Point(left+width, top+height), colour, /*thickness=*/5);
+    cv::rectangle(img, cv::Point(cc.left, cc.top), cv::Point(cc.left+cc.width, cc.top+cc.height), colour, /*thickness=*/5);
 
 
 }
@@ -83,41 +80,38 @@ int findMedian(vector<int> numbers) {
     }
 }
 
-void showCentroidClusters(const Mat& image, const Mat& labels, const Mat& stats, const Mat& centroids,
-        const vector<Cluster>& clustersByCentroid) {
+void showCentroidClusters(const Mat& image, const vector<ccCluster>& clustersByCentroid) {
     // now draw on the clustered CCs
     Mat clusteredCCs;
     cv::cvtColor(image, clusteredCCs, CV_GRAY2BGR);
-    for (const Cluster &c : clustersByCentroid) {
+    for (const ccCluster &c : clustersByCentroid) {
         // pick a pseudorandom nice colour
-        cv::Scalar colour = pseudoRandomColour(static_cast<int>(13*c.size()), ((int)c.mode[0] % 157));
-        for (int label : c.getLabels()) {
-            drawCC(clusteredCCs, labels, stats, centroids, label, colour);
+        cv::Scalar colour = pseudoRandomColour(static_cast<int>(13* c.getSize()), ((int)c.getMode()[0] % 157));
+        for (CComponent cc : c.getData()) {
+            drawCC(clusteredCCs, cc, colour);
         }
     }
     showImage(clusteredCCs);
 }
 
-void showRowBounds(const Mat& image, const Mat& labels, const Mat& stats, const Mat& centroids, const vector<Cluster>& clustersByCentroid) {
+void showRowBounds(const Mat& image, const vector<ccCluster>& clustersByCentroid) {
     /*
      * for each row, find top and bottom bounds
      */
     auto numRows = clustersByCentroid.size();
     vector<cv::Rect> rowBounds(numRows);
     int maxSize = 0;
-    for (const Cluster &c : clustersByCentroid) {
+    for (const ccCluster &c : clustersByCentroid) {
         int minY = image.rows;
         int maxY = 0;
-        int clusterSize = static_cast<int>(c.size());
+        int clusterSize = static_cast<int>(c.getSize());
         maxSize = cv::max(clusterSize, maxSize);
-        for (int label : c.getLabels()) {
-            int top = stats.at<int>(label, cv::CC_STAT_TOP);
-            int height = stats.at<int>(label, cv::CC_STAT_HEIGHT);
-            minY = cv::min(minY, top);
-            maxY = cv::max(maxY, top + height);
+        for (const CComponent& cc : c.getData()) {
+            minY = cv::min(minY, cc.top);
+            maxY = cv::max(maxY, cc.top + cc.height);
         }
         // rect parameters: x, y, width, height
-        // we'll use width for size, height for height
+        // we'll use width for getSize, height for height
         rowBounds.push_back(cv::Rect(0, minY, clusterSize, maxY - minY));
     }
 
@@ -126,7 +120,7 @@ void showRowBounds(const Mat& image, const Mat& labels, const Mat& stats, const 
     cv::cvtColor(image, rowsImg, CV_GRAY2BGR);
     for (cv::Rect& r : rowBounds) {
         // choose colour
-        // make width proportional to relative size of cluster
+        // make width proportional to relative getSize of cluster
         int width = static_cast<int>(round(((double)r.width/maxSize)*rowsImg.cols));
         int top = r.y;
         int bottom = r.y + r.height;
