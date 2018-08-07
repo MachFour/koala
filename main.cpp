@@ -1,4 +1,10 @@
-#include <opencv2/opencv.hpp>
+//#include <opencv2/opencv.hpp>
+#include <opencv2/core.hpp>
+#include <opencv2/highgui.hpp>
+#include <opencv2/imgcodecs.hpp>
+#include <opencv2/imgproc.hpp>
+#include <opencv2/text.hpp>
+//#include <opencv2/ximgproc.hpp>
 #include <iostream>
 #include <cstdio>
 #include <cstdlib>
@@ -8,7 +14,10 @@
 #include "meanshift.h"
 #include "Interval.h"
 #include "ccomponent.h"
-//#include <opencv2/ximgproc.hpp>
+
+const int CENTROID_CLUSTER_BANDWIDTH = 20;
+const int MIN_CC_AREA = 80;
+const int MIN_COMBINED_RECT_AREA = 1000;
 
 int main(int argc, char ** argv) {
     if (argc != 3) {
@@ -92,9 +101,8 @@ int main(int argc, char ** argv) {
 
     vector<meanShift::Point<CComponent>> yCentroids;
     Mat allComponents = binarised.clone();
-    int minArea = 200;
     for (CComponent& cc: allCCs) {
-        if (cc.area >= minArea) {
+        if (cc.area >= MIN_CC_AREA) {
             drawCC(allComponents, cc);
             //yCentroids.push_back(meanShift::Point {i, {centroidY}});
             // include height and width in clustering decision
@@ -106,7 +114,7 @@ int main(int argc, char ** argv) {
 
 
     // TODO justify bandwidth parameter
-    auto ccClusters = meanShift::cluster(yCentroids, 25);
+    auto ccClusters = meanShift::cluster(yCentroids, CENTROID_CLUSTER_BANDWIDTH);
     /*
     // show cluster modes
     for (Cluster& c : centroidClusters) {
@@ -165,23 +173,24 @@ int main(int argc, char ** argv) {
      */
 
     vector<cv::Rect> overlappingCCRects;
-    vector<size_t> rectsPerRow;
     for (ccCluster& c: clustersByCentroid) {
-        vector<vector<Interval>> overlapping;
+        vector<vector<Interval>> closeCCsInCluster;
         vector<Interval> intervals;
         for (CComponent cc : c.getData()) {
             double left = static_cast<double>(cc.left);
             double width = static_cast<double>(cc.width);
             intervals.push_back(Interval(cc.label, left, left+width));
         }
-        Interval::groupCloseIntervals(intervals, overlapping, 1.5);
+        Interval::groupCloseIntervals(intervals, closeCCsInCluster, 1.5);
+        // TODO also make sure that they overlap vertically
+
         // make rects for each partition
-        for (auto& partition : overlapping) {
+        for (auto& group : closeCCsInCluster) {
             int minTop = image.rows; // >= anything inside image
             int minLeft = image.cols; // >= anything inside image
             int maxBottom = 0; // <= smaller than anything inside image
             int maxRight = 0; // <= smaller than anything inside image
-            for (Interval& iv : partition) {
+            for (Interval& iv : group) {
                 // TODO avoid indexing back into global list
                 int label = iv.getLabel();
                 int top = allCCs[label].top;
@@ -194,18 +203,44 @@ int main(int argc, char ** argv) {
                 maxRight = cv::max(left+width, maxRight);
             }
             // left(x), top(y), width, height
-            overlappingCCRects.push_back(cv::Rect(minLeft, minTop, maxRight-minLeft, maxBottom-minTop));
+            int rectHeight = maxBottom - minTop;
+            int rectWidth = maxRight - minLeft;
+            if (rectHeight*rectWidth >= MIN_COMBINED_RECT_AREA) {
+                overlappingCCRects.push_back(cv::Rect(minLeft, minTop, rectWidth, rectHeight));
+            }
+            // TODO write all CC labels in the group to an image and then run Tesseract on it
         }
-        rectsPerRow.push_back(overlapping.size());
+
     }
     showRects(binarised, overlappingCCRects);
 
     // estimate number of columns as median/mean of rects in each row?
+
     /*
+     * TODO
      * find column separators as the vertical lines intersecting the least number of rectangles
      * there must be more rectangles lying between distinct column separators
      * than the number of rectangles that either one intersects
      */
+
+    /*
+    using cvTess = cv::text::OCRTesseract;
+    const char * whitelistChars = "1234567890%.<>abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    cv::Ptr<cvTess> ocr = cvTess::create("/usr/share/", "eng", whitelistChars, cv::text::PSM_AUTO);
+
+    for (int i=0; i<(int)nm_boxes.size(); i++) {
+
+        std::string outputText;
+        vector<cv::Rect>   boxes;
+        vector<std::string> words;
+        vector<float>  confidences;
+        ocr->run(group_img, outputText, &boxes, &words, &confidences, cv::text::OCR_LEVEL_WORD);
+
+        outputText.erase(remove(outputText.begin(), outputText.end(), '\n'), outputText.end());
+        std::cout << "OCR output = \"" << outputText << "\" length = " << outputText.size() << std::endl;
+    }
+    */
+
 
     // TODO Contour / line detection
     return saveOrShowImage(binarised, argv[2]);
