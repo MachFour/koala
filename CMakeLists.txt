@@ -14,9 +14,11 @@ set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -D_DEBUG")
 #set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -D_DEBUG -Og")
 
 find_package(OpenCV REQUIRED)
+#find_package(Tesseract REQUIRED)
 add_executable(reference main.cpp meanshift.cpp meanshift.h reference.h Interval.h Interval.cpp utils.cpp)
 
-target_link_libraries(reference ${OpenCV_LIBS})
+#https://stackoverflow.com/questions/20382549/cmake-for-tesseract-and-opencv#20392329
+target_link_libraries(reference lept tesseract ${OpenCV_LIBS})
 
 # add the install targets
 install (TARGETS reference DESTINATION .)

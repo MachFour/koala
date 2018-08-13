@@ -8,6 +8,7 @@
 #include <opencv2/opencv.hpp>
 #include "meanshift.h"
 #include "ccomponent.h"
+#include "Interval.h"
 
 using Mat = cv::Mat;
 template <typename T>
@@ -20,6 +21,7 @@ void drawCC(Mat&, const CComponent&, cv::Scalar colour = cv::Scalar(255, 255, 25
 
 std::string type2str(int type);
 Mat structuringElement(int size, cv::MorphShapes shape);
+Mat structuringElement(int width, int height, cv::MorphShapes shape);
 
 const static int BLUR_SIZE = 3;
 const static int STDDEV_WIN = 32;
@@ -31,6 +33,7 @@ void showRowBounds(const Mat&, const vector<ccCluster>&);
 void showRects(const Mat&, const vector<cv::Rect>&);
 
 int findMedian(vector<int> numbers);
+cv::Rect findBoundingRect(const vector<Interval>&, const vector<CComponent>&, int maxHeight, int maxWidth);
 
 // pseudo random RGB colours, for different numbers of parameters
 cv::Scalar pseudoRandomColour(int, int, int minVal = 96);

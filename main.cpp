@@ -3,8 +3,11 @@
 #include <opencv2/highgui.hpp>
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
-#include <opencv2/text.hpp>
 //#include <opencv2/ximgproc.hpp>
+
+#include <tesseract/baseapi.h>
+#include <leptonica/allheaders.h>
+
 #include <iostream>
 #include <cstdio>
 #include <cstdlib>
@@ -18,6 +21,7 @@
 const int CENTROID_CLUSTER_BANDWIDTH = 20;
 const int MIN_CC_AREA = 80;
 const int MIN_COMBINED_RECT_AREA = 1000;
+const int MAX_COMBINED_RECT_AREA = 2000*1500/4;
 
 int main(int argc, char ** argv) {
     if (argc != 3) {
@@ -49,9 +53,11 @@ int main(int argc, char ** argv) {
     morphologyEx(preprocessed, preprocessed, cv::MorphTypes::MORPH_BLACKHAT, structuringElement(100, cv::MORPH_ELLIPSE));
     cv::normalize(preprocessed, preprocessed, 0, 255, cv::NORM_MINMAX);
 
+    //clean it up a bit?
+
     Mat open = preprocessed;
     // shapes: MORPH_RECT, MORPH_CROSS, MORPH_ELLIPSE
-    //cv::morphologyEx(open, open, cv::MorphTypes::MORPH_OPEN, structuringElement(4, cv::MORPH_ELLIPSE));
+    //cv::morphologyEx(open, open, cv::MorphTypes::MORPH_OPEN, structuringElement(10, cv::MORPH_CROSS));
     // dilate to make text a bit more clear?
 
     Mat binarised;
@@ -173,6 +179,27 @@ int main(int argc, char ** argv) {
      */
 
     vector<cv::Rect> overlappingCCRects;
+
+    tesseract::TessBaseAPI tesseractAPI;
+    int tessStatus = tesseractAPI.Init("/usr/share/tessdata/", "eng", tesseract::OcrEngineMode::OEM_TESSERACT_ONLY);
+    //int tessStatus = tesseractAPI.Init("/usr/share/tessdata/", "eng", tesseract::OcrEngineMode::OEM_LSTM_ONLY);
+    if (tessStatus == -1) {
+        fprintf(stderr, "Could not initialise tesseract API");
+        return 1;
+    }
+    //tesseractAPI.ReadConfigFile();
+
+    // tesseractAPI.SetPageSegMode(tesseract::PageSegMode::PSM_SINGLE_BLOCK_VERT_TEXT);
+    tesseractAPI.SetPageSegMode(tesseract::PageSegMode::PSM_RAW_LINE);
+    tesseractAPI.SetSourceResolution(300);
+
+    // NOTE this doesn't work when using the LSTM functionality of tesseract
+    const char * whitelistChars = "1234567890%,-.<>abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    const char * blacklistChars = "{}|";
+    tesseractAPI.SetVariable("tessedit_char_whitelist", whitelistChars);
+    tesseractAPI.SetVariable("tessedit_char_blacklist", blacklistChars);
+    //cv::Ptr<cvTess> ocr = cvTess::create("/usr/share/", "eng", whitelistChars, cv::text::PSM_AUTO);
+
     for (ccCluster& c: clustersByCentroid) {
         vector<vector<Interval>> closeCCsInCluster;
         vector<Interval> intervals;
@@ -185,32 +212,74 @@ int main(int argc, char ** argv) {
         // TODO also make sure that they overlap vertically
 
         // make rects for each partition
-        for (auto& group : closeCCsInCluster) {
-            int minTop = image.rows; // >= anything inside image
-            int minLeft = image.cols; // >= anything inside image
-            int maxBottom = 0; // <= smaller than anything inside image
-            int maxRight = 0; // <= smaller than anything inside image
+        for (vector<Interval>& group : closeCCsInCluster) {
+            cv::Rect expandedBB = findBoundingRect(group, allCCs, image.rows, image.cols);
+
+            // simple filtering
+            int area = expandedBB.height*expandedBB.width;
+            if (area <= MIN_COMBINED_RECT_AREA || area > MAX_COMBINED_RECT_AREA) {
+                continue;
+            }
+            overlappingCCRects.push_back(expandedBB);
+
+            //tesseractAPI.SetRectangle(expandedBB.x, expandedBB.y, expandedBB.width, expandedBB.height);
+
+            // now combine each set of close CCs into an image
+            Mat binarisedCCroi(labels, expandedBB); // view of label matrix corresponding to current region of interest
+            Mat ccsInRect(expandedBB.height, expandedBB.width, CV_8UC1); // this will hold our connected component image
+            ccsInRect = 0; // without this, the image gets corrupted with crap
+            //printf("grouped CCs inside rect: x=%d, y=%d, w=%d, ht=%d\n", expandedBB.x, expandedBB.y, expandedBB.width, expandedBB.height);
             for (Interval& iv : group) {
                 // TODO avoid indexing back into global list
-                int label = iv.getLabel();
-                int top = allCCs[label].top;
-                int height = allCCs[label].height;
-                int width = allCCs[label].width;
-                int left = allCCs[label].left;
-                minTop = cv::min(top, minTop);
-                minLeft = cv::min(left, minLeft);
-                maxBottom = cv::max(top+height, maxBottom);
-                maxRight = cv::max(left+width, maxRight);
+                Mat oneCC(binarisedCCroi.rows, binarisedCCroi.cols, CV_8UC1);
+                cv::compare(binarisedCCroi, iv.getLabel(), oneCC, cv::CMP_EQ);
+                //cv::bitwise_or(ccsInRect, oneCC, ccsInRect);
+                cv::bitwise_or(ccsInRect, 255, ccsInRect, /*mask=*/oneCC);
             }
-            // left(x), top(y), width, height
-            int rectHeight = maxBottom - minTop;
-            int rectWidth = maxRight - minLeft;
-            if (rectHeight*rectWidth >= MIN_COMBINED_RECT_AREA) {
-                overlappingCCRects.push_back(cv::Rect(minLeft, minTop, rectWidth, rectHeight));
-            }
-            // TODO write all CC labels in the group to an image and then run Tesseract on it
-        }
+            // clean it up a bit?
+            cv::morphologyEx(ccsInRect, ccsInRect, cv::MorphTypes::MORPH_ERODE, structuringElement(3, cv::MORPH_ELLIPSE));
+            cv::morphologyEx(ccsInRect, ccsInRect, cv::MorphTypes::MORPH_OPEN, structuringElement(2, 8, cv::MORPH_RECT));
 
+            // invert for tesseract
+            ccsInRect = 255-ccsInRect;
+            // run Tesseract
+            //vector<cv::Rect>   boxes;
+            //vector<std::string> words;
+            //vector<float>  confidences;
+            int bytes_per_line = static_cast<int>(ccsInRect.step1()*ccsInRect.elemSize());
+            tesseractAPI.SetImage(ccsInRect.data, ccsInRect.cols, ccsInRect.rows, /*bytes_per_pixel=*/1, bytes_per_line);
+            //ocr->run(ccsInRect, outputText, &boxes, &words, &confidences, cv::text::OCR_LEVEL_WORD);
+            //tesseractAPI.Recognize(0);
+            const char * out = tesseractAPI.GetUTF8Text();
+            const char * tsvText = tesseractAPI.GetTSVText(0);
+            const char * hocrText = tesseractAPI.GetHOCRText(0);
+            const char * unlvText = tesseractAPI.GetUNLVText();
+
+            /*
+            Pix * img = tesseractAPI.GetInputImage();
+            // create mat from img data. step parameter is number of bytes per row, wpl is (integer) words per line
+            PIX * converted = pixConvert8To32(img);
+            Mat tessPix(ccsInRect.rows, ccsInRect.cols, CV_8UC4, converted->data, sizeof(int)*converted->wpl);
+            pixDestroy(&converted);
+            showImage(tessPix);
+            */
+
+            /*
+            std::string outputText(out);
+            outputText.erase(remove(outputText.begin(), outputText.end(), '\n'), outputText.end());
+            std::cout << "OCR output = \"" << outputText << "\" length = " << outputText.size() << std::endl;
+            */
+            printf("OCR text output: '%s'\n", out);
+            printf("hOCR text: '%s'\n", hocrText);
+            printf("tsv text: '%s'\n", tsvText);
+            printf("UNLV text: '%s'\n", unlvText);
+            delete[] out;
+            delete[] hocrText;
+            delete[] unlvText;
+            delete[] tsvText;
+
+            showImage(ccsInRect);
+        }
     }
     showRects(binarised, overlappingCCRects);
 
@@ -223,25 +292,7 @@ int main(int argc, char ** argv) {
      * than the number of rectangles that either one intersects
      */
 
-    /*
-    using cvTess = cv::text::OCRTesseract;
-    const char * whitelistChars = "1234567890%.<>abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
-    cv::Ptr<cvTess> ocr = cvTess::create("/usr/share/", "eng", whitelistChars, cv::text::PSM_AUTO);
-
-    for (int i=0; i<(int)nm_boxes.size(); i++) {
-
-        std::string outputText;
-        vector<cv::Rect>   boxes;
-        vector<std::string> words;
-        vector<float>  confidences;
-        ocr->run(group_img, outputText, &boxes, &words, &confidences, cv::text::OCR_LEVEL_WORD);
-
-        outputText.erase(remove(outputText.begin(), outputText.end(), '\n'), outputText.end());
-        std::cout << "OCR output = \"" << outputText << "\" length = " << outputText.size() << std::endl;
-    }
-    */
-
-
     // TODO Contour / line detection
+    //tesseractAPI.End();
     return saveOrShowImage(binarised, argv[2]);
 }

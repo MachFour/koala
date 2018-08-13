@@ -6,6 +6,7 @@
 #include <algorithm>
 #include "reference.h"
 #include "ccomponent.h"
+#include "Interval.h"
 
 void drawCC(Mat& img, const CComponent& cc, cv::Scalar colour) {
     //int area = stats.at<int>(which, cv::CC_STAT_AREA);
@@ -28,6 +29,31 @@ void drawCC(Mat& img, const CComponent& cc, cv::Scalar colour) {
     cv::rectangle(img, cv::Point(cc.left, cc.top), cv::Point(cc.left+cc.width, cc.top+cc.height), colour, /*thickness=*/5);
 
 
+}
+
+cv::Rect findBoundingRect(const vector<Interval>& intervals, const vector<CComponent>& allCCs, int maxHeight, int maxWidth) {
+    int minTop = maxHeight; // >= anything inside image
+    int minLeft = maxWidth; // >= anything inside image
+    int maxBottom = 0; // <= smaller than anything inside image
+    int maxRight = 0; // <= smaller than anything inside image
+    for (const Interval& iv : intervals) {
+        // TODO avoid indexing back into global list
+        int label = iv.getLabel();
+        int top = allCCs[label].top;
+        int height = allCCs[label].height;
+        int width = allCCs[label].width;
+        int left = allCCs[label].left;
+        minTop = cv::min(top, minTop);
+        minLeft = cv::min(left, minLeft);
+        maxBottom = cv::max(top+height, maxBottom);
+        maxRight = cv::max(left+width, maxRight);
+    }
+    // left(x), top(y), width, height
+    int rectHeight = maxBottom - minTop;
+    int rectWidth = maxRight - minLeft;
+
+    // simple filtering
+    return cv::Rect(minLeft, minTop, rectWidth, rectHeight);
 }
 
 std::string type2str(int type) {
@@ -55,7 +81,11 @@ std::string type2str(int type) {
 
 Mat structuringElement(int size, cv::MorphShapes shape) {
     // point (-1, -1) represents centred structuring element
-    return cv::getStructuringElement(shape, cv::Size(size, size) /*, cv::point anchor = cv::point(-1, -1) */);
+    return structuringElement(size, size, shape);
+}
+Mat structuringElement(int width, int height, cv::MorphShapes shape) {
+    // point (-1, -1) represents centred structuring element
+    return cv::getStructuringElement(shape, cv::Size(width, height) /*, cv::point anchor = cv::point(-1, -1) */);
 }
 
 void showImage(const Mat& img) {
