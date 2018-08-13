@@ -6,6 +6,7 @@
 #define REFERENCE_H
 
 #include <opencv2/opencv.hpp>
+#include <leptonica/allheaders.h>
 #include "meanshift.h"
 #include "ccomponent.h"
 #include "Interval.h"
@@ -23,6 +24,7 @@ std::string type2str(int type);
 Mat structuringElement(int size, cv::MorphShapes shape);
 Mat structuringElement(int width, int height, cv::MorphShapes shape);
 
+
 const static int BLUR_SIZE = 3;
 const static int STDDEV_WIN = 32;
 const static cv::Size STDDEV_WIN_SIZE = cv::Size(STDDEV_WIN, STDDEV_WIN);
@@ -30,10 +32,11 @@ const static double VARIANCE_THRESHOLD = 0.1;
 
 void showCentroidClusters(const Mat&, const vector<ccCluster>&);
 void showRowBounds(const Mat&, const vector<ccCluster>&);
-void showRects(const Mat&, const vector<cv::Rect>&);
+void showRects(const Mat&, const vector<vector<cv::Rect>>&);
 
 int findMedian(vector<int> numbers);
 cv::Rect findBoundingRect(const vector<Interval>&, const vector<CComponent>&, int maxHeight, int maxWidth);
+cv::Mat matFromPix1(PIX * pix);
 
 // pseudo random RGB colours, for different numbers of parameters
 cv::Scalar pseudoRandomColour(int, int, int minVal = 96);

@@ -2,8 +2,11 @@
 // Created by max on 8/3/18.
 //
 
+#include <leptonica/allheaders.h>
+
 #include <vector>
 #include <algorithm>
+
 #include "reference.h"
 #include "ccomponent.h"
 #include "Interval.h"
@@ -159,11 +162,13 @@ void showRowBounds(const Mat& image, const vector<ccCluster>& clustersByCentroid
     showImage(rowsImg);
 }
 
-void showRects(const Mat& image, const vector<cv::Rect>& overlappingCCRects) {
+void showRects(const Mat& image, const vector<vector<cv::Rect>>& rows) {
     Mat rectImg;
     cv::cvtColor(image, rectImg, CV_GRAY2BGR);
-    for (const cv::Rect& r : overlappingCCRects) {
-        cv::rectangle(rectImg, r, pseudoRandomColour(r.x, r.y, r.width, r.height), 5);
+    for (const auto& row : rows) {
+        for (const cv::Rect &r : row) {
+            cv::rectangle(rectImg, r, pseudoRandomColour(r.x, r.y, r.width, r.height), 5);
+        }
     }
     showImage(rectImg);
 }
@@ -180,6 +185,23 @@ cv::Scalar pseudoRandomColour(int a, int b, int c, int d, int minVal) {
     int blue = minVal + (multiplier * d * a * b % modVal);
     return cv::Scalar(red, green, blue);
 }
+
+// returns 8-bit single channel Mat from corresponding binary pix image
+cv::Mat matFromPix1(PIX * pix) {
+    Mat mat(pix->h, pix->w, CV_8UC1);
+    // loop inspired by function ImageThresholder::SetImage from src/ccmain/thresholder.cpp of Tesseract
+    // located at: https://github.com/tesseract-ocr/tesseract/tree/master/src/ccmain/thresholder.cpp
+
+    l_uint32* data = pixGetData(pix);
+    int wpl = pixGetWpl(pix);
+    for (unsigned int y = 0; y < pix->h; ++y, data += wpl) {
+        for (unsigned int x = 0; x < pix->w; ++x) {
+            mat.at<unsigned char>(y, x) = (unsigned char) (GET_DATA_BIT(data, x) ? 255 : 0);
+        }
+    }
+    return mat;
+}
+
 
 int saveOrShowImage(const Mat& img, const char * outFile) {
     bool isForDisplay = strcmp(outFile, "show") == 0;
