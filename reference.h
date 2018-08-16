@@ -32,7 +32,7 @@ const static double VARIANCE_THRESHOLD = 0.1;
 
 void showCentroidClusters(const Mat&, const vector<ccCluster>&);
 void showRowBounds(const Mat&, const vector<ccCluster>&);
-void showRects(const Mat&, const vector<vector<cv::Rect>>&);
+Mat overlayRects(const Mat&, const vector<vector<cv::Rect>>&);
 
 int findMedian(vector<int> numbers);
 cv::Rect findBoundingRect(const vector<Interval>&, const vector<CComponent>&, int maxHeight, int maxWidth);

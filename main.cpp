@@ -3,6 +3,7 @@
 #include <opencv2/highgui.hpp>
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
+#include <opencv2/plot.hpp>
 //#include <opencv2/ximgproc.hpp>
 
 #include <tesseract/baseapi.h>
@@ -210,7 +211,8 @@ int main(int argc, char ** argv) {
             }
         }
     }
-    showRects(binarised, rows);
+    Mat rects = overlayRects(binarised, rows);
+    showImage(rects);
 
     /*
      * TODO
@@ -220,9 +222,101 @@ int main(int argc, char ** argv) {
      */
     // estimate number of columns as median/mean of rects in each row?
 
-    for (auto row : rows) {
+
+    unsigned char rectsPerRowIQR;
+    unsigned char rectsPerRowQ1; // 1st quartile
+    unsigned char rectsPerRowQ2; // median
+    unsigned char rectsPerRowQ3; // 3rd quartile
+    double avgRectsPerRow;
+    double stddevRectsPerRow;
+
+    {
+        Mat rectsPerRow;
+        Mat sortedRectsPerRow;
+        for (auto &row : rows) {
+            unsigned char s = static_cast<unsigned char>(row.size());
+            if (s != 0) {
+                rectsPerRow.push_back(s);
+            }
+        }
+        cv::sort(rectsPerRow, sortedRectsPerRow, CV_SORT_EVERY_COLUMN | CV_SORT_ASCENDING);
+
+        Mat sumRectsPerRow;
+        Mat sumSqRectsPerRow;
+        cv::integral(sortedRectsPerRow, sumRectsPerRow, sumSqRectsPerRow, CV_32S, CV_64F);
+        int n = static_cast<int>(sumRectsPerRow.size[0]);
+        rectsPerRowQ1 = sortedRectsPerRow.at<unsigned char>(n/4);
+        rectsPerRowQ2 = sortedRectsPerRow.at<unsigned char>(n/2);
+        rectsPerRowQ3 = sortedRectsPerRow.at<unsigned char>(n*3/4);
+        rectsPerRowIQR = rectsPerRowQ3 - rectsPerRowQ1;
+        avgRectsPerRow = sumRectsPerRow.at<int>(n-1)*1.0/n;
+        double meanSqRectsPerRow = sumSqRectsPerRow.at<double>(n-1)/n;
+        stddevRectsPerRow = sqrt(meanSqRectsPerRow - avgRectsPerRow*avgRectsPerRow);
+    }
+    // alt: find median
+
+    // this will count how many rects (from eligible rows) would be intersected by a cut at the given X coordinate
+    //int * rectsCutByXCount = new int[image.cols];
+    Mat rectsCutByXCount(image.cols, 1, CV_64FC1, cv::Scalar(0));
+    // this will count the total height of all rects (from eligible rows) that would be intersected by a cut at the given X coordinate
+    Mat totalRectHeightByXCoord(image.cols, 1, CV_64FC1, cv::Scalar(0));
+    for (auto& row : rows) {
+        if (row.size() < rectsPerRowQ1) {
+            continue;
+        }
+        for (cv::Rect rect : row) {
+            for (int j = rect.x; j < rect.x + rect.width; ++j) {
+                rectsCutByXCount.at<double>(j)+= 1.0;
+                totalRectHeightByXCoord.at<double>(j) += (double) rect.height;
+            }
+        }
+    }
+
+    Mat smoothedRectsCutByXCount;
+    {
+        int blurSize = image.cols/8;
+        if (blurSize % 2 == 0) {
+            blurSize++;
+        }
+        cv::GaussianBlur(rectsCutByXCount, smoothedRectsCutByXCount, cv::Size(blurSize, blurSize), 0, 0);
+    }
+
+    // now find minima
+    int howManyMinima = 5;
+    // findpeaks??
+    // todo plotCounts and find a useful benchmark?
+
+    {
+        cv::Ptr<cv::plot::Plot2d> plotCounts = cv::plot::Plot2d::create(rectsCutByXCount);
+        plotCounts->setNeedPlotLine(true);
+        plotCounts->setShowGrid(false);
+        plotCounts->setPlotLineWidth(7);
+        plotCounts->setPlotSize(image.cols, image.rows);
+        plotCounts->setInvertOrientation(true);
+
+        cv::Ptr<cv::plot::Plot2d> smoothedPlotCounts = cv::plot::Plot2d::create(smoothedRectsCutByXCount);
+        smoothedPlotCounts->setNeedPlotLine(true);
+        smoothedPlotCounts->setShowGrid(false);
+        smoothedPlotCounts->setPlotLineWidth(7);
+        smoothedPlotCounts->setPlotLineColor(cv::Scalar(0, 255, 0));
+        smoothedPlotCounts->setPlotSize(image.cols, image.rows);
+        smoothedPlotCounts->setInvertOrientation(true);
+
+        Mat plotResultCounts;
+        Mat plotResultSmoothedCounts;
+
+        plotCounts->render(plotResultCounts);
+        smoothedPlotCounts->render(plotResultSmoothedCounts);
+        showImage(0.5*plotResultCounts + 0.5*rects);
+        showImage(0.5*plotResultSmoothedCounts + 0.5*rects);
+    }
+
+    // TODO find peaks/troughs (minimum values). Make sure that two peaks are 'distinct' enough in which boxes they separate
+    // TODO once columns are decided, then classify words on either side by centroid location
+
+    for (auto& row : rows) {
         for (cv::Rect wordBB : row) {
-            const char * wordText = getText(tesseractAPI, wordBB, true);
+            const char * wordText = getText(tesseractAPI, wordBB, /* printAndShow = */false);
             delete[] wordText;
         }
     }

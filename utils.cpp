@@ -162,7 +162,7 @@ void showRowBounds(const Mat& image, const vector<ccCluster>& clustersByCentroid
     showImage(rowsImg);
 }
 
-void showRects(const Mat& image, const vector<vector<cv::Rect>>& rows) {
+Mat overlayRects(const Mat& image, const vector<vector<cv::Rect>>& rows) {
     Mat rectImg;
     cv::cvtColor(image, rectImg, CV_GRAY2BGR);
     for (const auto& row : rows) {
@@ -170,7 +170,7 @@ void showRects(const Mat& image, const vector<vector<cv::Rect>>& rows) {
             cv::rectangle(rectImg, r, pseudoRandomColour(r.x, r.y, r.width, r.height), 5);
         }
     }
-    showImage(rectImg);
+    return rectImg;
 }
 
 cv::Scalar pseudoRandomColour(int a, int b, int minVal) {
