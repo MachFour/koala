@@ -10,6 +10,7 @@
 #include "reference.h"
 #include "ccomponent.h"
 #include "Interval.h"
+#include "randomColour.h"
 
 void drawCC(Mat& img, const CComponent& cc, cv::Scalar colour) {
     //int area = stats.at<int>(which, cv::CC_STAT_AREA);
@@ -119,7 +120,7 @@ void showCentroidClusters(const Mat& image, const vector<ccCluster>& clustersByC
     cv::cvtColor(image, clusteredCCs, CV_GRAY2BGR);
     for (const ccCluster &c : clustersByCentroid) {
         // pick a pseudorandom nice colour
-        cv::Scalar colour = pseudoRandomColour(static_cast<int>(13* c.getSize()), ((int)c.getMode()[0] % 157));
+        cv::Scalar colour = pseudoRandomColour(13* c.getSize(), ((int)c.getMode()[0]) % 157);
         for (CComponent cc : c.getData()) {
             drawCC(clusteredCCs, cc, colour);
         }
@@ -162,29 +163,26 @@ void showRowBounds(const Mat& image, const vector<ccCluster>& clustersByCentroid
     showImage(rowsImg);
 }
 
-Mat overlayRects(const Mat& image, const vector<vector<cv::Rect>>& rows) {
+Mat overlayWords(const Mat &image, const vector<vector<wordBB>> &rows, bool colourByRowCol) {
     Mat rectImg;
     cv::cvtColor(image, rectImg, CV_GRAY2BGR);
-    for (const auto& row : rows) {
-        for (const cv::Rect &r : row) {
-            cv::rectangle(rectImg, r, pseudoRandomColour(r.x, r.y, r.width, r.height), 5);
+    for (const auto &row : rows) {
+        for (const wordBB &w : row) {
+            cv::rectangle(rectImg, w.asRect(), w.getColour(colourByRowCol), 5);
         }
     }
     return rectImg;
 }
 
-cv::Scalar pseudoRandomColour(int a, int b, int minVal) {
-    return pseudoRandomColour(a, b, 3*a+5*b, a*b, minVal);
+Mat overlayWords(const Mat &image, const vector<wordBB> &allWordBBs, bool colourByCol) {
+    Mat rectImg;
+    cv::cvtColor(image, rectImg, CV_GRAY2BGR);
+    for (const wordBB &w : allWordBBs) {
+        cv::rectangle(rectImg, w.asRect(), w.getColour(colourByCol), 5);
+    }
+    return rectImg;
+}
 
-}
-cv::Scalar pseudoRandomColour(int a, int b, int c, int d, int minVal) {
-    int modVal = 255-minVal;
-    int multiplier = 31;
-    int red = minVal + (multiplier * a * b * c % modVal);
-    int green = minVal + (multiplier * b * c * d % modVal);
-    int blue = minVal + (multiplier * d * a * b % modVal);
-    return cv::Scalar(red, green, blue);
-}
 
 // returns 8-bit single channel Mat from corresponding binary pix image
 cv::Mat matFromPix1(PIX * pix) {
@@ -202,6 +200,31 @@ cv::Mat matFromPix1(PIX * pix) {
     return mat;
 }
 
+// element-wise derivative/difference along first dimension
+// matrix must be CV_64F
+Mat derivative(const Mat& src) {
+    Mat deriv(src.rows, src.cols, CV_64FC1, cv::Scalar(0));
+    for (int x = 0; x < src.cols; ++x) {
+        for (int y = 1; y < src.rows; ++y) {
+            deriv.at<double>(y, x) = src.at<double>(y, x) - src.at<double>(y-1, x);
+        }
+    }
+    return deriv;
+}
+
+cv::Ptr<Plot> makePlot(const Mat &data, const Mat *resize, cv::Scalar colour, int thickness) {
+    cv::Ptr<Plot> plot = Plot::create(data);
+    plot->setNeedPlotLine(true);
+    plot->setShowGrid(false);
+    plot->setPlotLineWidth(thickness);
+    plot->setPlotLineColor(colour);
+    if (resize != nullptr) {
+        plot->setPlotSize(resize->cols, resize->rows);
+    }
+    plot->setInvertOrientation(true);
+
+    return plot;
+}
 
 int saveOrShowImage(const Mat& img, const char * outFile) {
     bool isForDisplay = strcmp(outFile, "show") == 0;

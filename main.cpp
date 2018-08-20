@@ -4,6 +4,7 @@
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
 #include <opencv2/plot.hpp>
+#include <opencv2/ml.hpp>
 //#include <opencv2/ximgproc.hpp>
 
 #include <tesseract/baseapi.h>
@@ -25,7 +26,7 @@ const int MIN_COMBINED_RECT_AREA = 1000;
 const int MAX_COMBINED_RECT_AREA = 2000*1500/4;
 
 int tesseractInit(tesseract::TessBaseAPI&);
-const char * getText(tesseract::TessBaseAPI&, cv::Rect, bool printAndShow=false);
+const char * getText(tesseract::TessBaseAPI&, wordBB, bool printAndShow=false);
 
 int main(int argc, char ** argv) {
     if (argc != 3) {
@@ -92,9 +93,9 @@ int main(int argc, char ** argv) {
         allCCs.push_back(cc);
     }
 
-    showImage(image);
-    showImage(open);
-    showImage(binarised);
+    //showImage(image);
+    //showImage(open);
+    //showImage(binarised);
 
     vector<meanShift::Point<CComponent>> yCentroids;
     Mat allComponents = binarised.clone();
@@ -107,7 +108,7 @@ int main(int argc, char ** argv) {
             yCentroids.push_back(meanShift::Point<CComponent> {cc, {cc.centroidY, ccHeight}});
         }
     }
-    showImage(allComponents);
+    //showImage(allComponents);
 
 
     // TODO justify bandwidth parameter
@@ -157,8 +158,8 @@ int main(int argc, char ** argv) {
         clustersByCentroid.push_back(heightClusters[0]);
     }
 
-    showCentroidClusters(binarised, clustersByCentroid);
-    showRowBounds(binarised, clustersByCentroid);
+    //showCentroidClusters(binarised, clustersByCentroid);
+    //showRowBounds(binarised, clustersByCentroid);
 
     /*
      * For each row / centroid cluster:
@@ -182,7 +183,7 @@ int main(int argc, char ** argv) {
 
 
     // make 'rows' of 'words'
-    vector<vector<cv::Rect>> rows;
+    vector<vector<wordBB>> rows;
     for (ccCluster& c: clustersByCentroid) {
         vector<vector<Interval>> closeCCsInCluster;
         vector<Interval> intervals;
@@ -195,27 +196,27 @@ int main(int argc, char ** argv) {
         // TODO also make sure that they overlap vertically
 
         // add new row
-        vector<cv::Rect> row;
+        vector<wordBB> row;
         rows.push_back(row);
 
         // make rects for each partition
         for (vector<Interval> &group : closeCCsInCluster) {
-            cv::Rect expandedBB = findBoundingRect(group, allCCs, image.rows, image.cols);
+            wordBB w = wordBB(findBoundingRect(group, allCCs, image.rows, image.cols));
             // simple filtering
-            int area = expandedBB.height * expandedBB.width;
+            int area = w.getArea();
             if (area <= MIN_COMBINED_RECT_AREA || area > MAX_COMBINED_RECT_AREA) {
                 continue;
             } else {
                 // add to rows
-                rows.back().push_back(expandedBB);
+                rows.back().push_back(w);
             }
         }
     }
-    Mat rects = overlayRects(binarised, rows);
+
+    Mat rects = overlayWords(binarised, rows, false);
     showImage(rects);
 
     /*
-     * TODO
      * find column separators as the vertical lines intersecting the least number of rectangles
      * there must be more rectangles lying between distinct column separators
      * than the number of rectangles that either one intersects
@@ -227,8 +228,6 @@ int main(int argc, char ** argv) {
     unsigned char rectsPerRowQ1; // 1st quartile
     unsigned char rectsPerRowQ2; // median
     unsigned char rectsPerRowQ3; // 3rd quartile
-    double avgRectsPerRow;
-    double stddevRectsPerRow;
 
     {
         Mat rectsPerRow;
@@ -240,83 +239,207 @@ int main(int argc, char ** argv) {
             }
         }
         cv::sort(rectsPerRow, sortedRectsPerRow, CV_SORT_EVERY_COLUMN | CV_SORT_ASCENDING);
-
-        Mat sumRectsPerRow;
-        Mat sumSqRectsPerRow;
-        cv::integral(sortedRectsPerRow, sumRectsPerRow, sumSqRectsPerRow, CV_32S, CV_64F);
-        int n = static_cast<int>(sumRectsPerRow.size[0]);
+        //cv::integral(sortedRectsPerRow, sumRectsPerRow, sumSqRectsPerRow, CV_32S, CV_64F);
+        int n = static_cast<int>(rectsPerRow.size[0]);
         rectsPerRowQ1 = sortedRectsPerRow.at<unsigned char>(n/4);
         rectsPerRowQ2 = sortedRectsPerRow.at<unsigned char>(n/2);
         rectsPerRowQ3 = sortedRectsPerRow.at<unsigned char>(n*3/4);
         rectsPerRowIQR = rectsPerRowQ3 - rectsPerRowQ1;
-        avgRectsPerRow = sumRectsPerRow.at<int>(n-1)*1.0/n;
-        double meanSqRectsPerRow = sumSqRectsPerRow.at<double>(n-1)/n;
-        stddevRectsPerRow = sqrt(meanSqRectsPerRow - avgRectsPerRow*avgRectsPerRow);
     }
-    // alt: find median
 
+    vector<wordBB> wordBBsforColumnInference;
+    vector<wordBB> allWordBBs;
+    {
+        int rowNum = 0;
+        for (auto &row : rows) {
+            if (row.size() == 0) {
+                continue;
+            }
+            for (wordBB& w : row) {
+                w.row = rowNum;
+                allWordBBs.push_back(w);
+                if (row.size() >= rectsPerRowQ1) {
+                    // otherwise too few rows for accurate column number estimation is likely to be faulty
+                    wordBBsforColumnInference.push_back(w);
+                }
+            }
+            rowNum++;
+        }
+    }
     // this will count how many rects (from eligible rows) would be intersected by a cut at the given X coordinate
     //int * rectsCutByXCount = new int[image.cols];
-    Mat rectsCutByXCount(image.cols, 1, CV_64FC1, cv::Scalar(0));
+    Mat rectsCutByXCount64F(image.cols, 1, CV_64FC1, cv::Scalar(0));
+    Mat rectsCutByXCount(image.cols, 1, CV_8UC1, cv::Scalar(0));
     // this will count the total height of all rects (from eligible rows) that would be intersected by a cut at the given X coordinate
     Mat totalRectHeightByXCoord(image.cols, 1, CV_64FC1, cv::Scalar(0));
-    for (auto& row : rows) {
-        if (row.size() < rectsPerRowQ1) {
-            continue;
-        }
-        for (cv::Rect rect : row) {
-            for (int j = rect.x; j < rect.x + rect.width; ++j) {
-                rectsCutByXCount.at<double>(j)+= 1.0;
-                totalRectHeightByXCoord.at<double>(j) += (double) rect.height;
-            }
+    for (auto& wordBB : wordBBsforColumnInference) {
+        for (int j = wordBB.x; j < wordBB.x + wordBB.width; ++j) {
+            rectsCutByXCount64F.at<double>(j)+= 1.0;
+            totalRectHeightByXCoord.at<double>(j) += (double) wordBB.height;
         }
     }
 
-    Mat smoothedRectsCutByXCount;
+    Mat smoothedRectCutDensity;
     {
-        int blurSize = image.cols/8;
+        int blurSize = image.cols/32;
         if (blurSize % 2 == 0) {
             blurSize++;
         }
-        cv::GaussianBlur(rectsCutByXCount, smoothedRectsCutByXCount, cv::Size(blurSize, blurSize), 0, 0);
-    }
+        cv::GaussianBlur(rectsCutByXCount64F, smoothedRectCutDensity, cv::Size(blurSize, blurSize), 0, 0);
+        //cv::medianBlur(rectsCutByXCount64F, smoothedRectCutDensity, blurSize);
+        //cv::normalize(smoothedRectCutDensity)
 
-    // now find minima
-    int howManyMinima = 5;
-    // findpeaks??
-    // todo plotCounts and find a useful benchmark?
+        cv::Ptr<Plot> plotCounts = makePlot(rectsCutByXCount64F, &image);
+        cv::Ptr<Plot> plotSmoothedCounts = makePlot(smoothedRectCutDensity, &image);
+        Mat plotResultCounts; {
+            plotCounts->render(plotResultCounts);
+        }
+        Mat plotResultSmoothedCounts; {
+            plotSmoothedCounts->render(plotResultSmoothedCounts);
+        }
 
-    {
-        cv::Ptr<cv::plot::Plot2d> plotCounts = cv::plot::Plot2d::create(rectsCutByXCount);
-        plotCounts->setNeedPlotLine(true);
-        plotCounts->setShowGrid(false);
-        plotCounts->setPlotLineWidth(7);
-        plotCounts->setPlotSize(image.cols, image.rows);
-        plotCounts->setInvertOrientation(true);
-
-        cv::Ptr<cv::plot::Plot2d> smoothedPlotCounts = cv::plot::Plot2d::create(smoothedRectsCutByXCount);
-        smoothedPlotCounts->setNeedPlotLine(true);
-        smoothedPlotCounts->setShowGrid(false);
-        smoothedPlotCounts->setPlotLineWidth(7);
-        smoothedPlotCounts->setPlotLineColor(cv::Scalar(0, 255, 0));
-        smoothedPlotCounts->setPlotSize(image.cols, image.rows);
-        smoothedPlotCounts->setInvertOrientation(true);
-
-        Mat plotResultCounts;
-        Mat plotResultSmoothedCounts;
-
-        plotCounts->render(plotResultCounts);
-        smoothedPlotCounts->render(plotResultSmoothedCounts);
         showImage(0.5*plotResultCounts + 0.5*rects);
         showImage(0.5*plotResultSmoothedCounts + 0.5*rects);
+    }
+
+    int estimatedColumns;
+    /*
+     * Fourier transform the smoothed Rect Cut density and find the strongest peak,
+     * to estimate the number of columns
+     */
+    {
+        // first remove the mean from the function to get rid of 'DC' energy;
+        cv::Scalar avgVal = cv::mean(smoothedRectCutDensity);
+        Mat m00 = smoothedRectCutDensity - avgVal;
+        Mat m0, m1, m2, m3, m4, m5, m6;
+        int N = cv::getOptimalDFTSize(smoothedRectCutDensity.rows);
+        // pad with zeros
+        // copyMakeBorder(src, dest, top, bottom, left, right, borderType, fillValue)
+        cv::copyMakeBorder(m00, m0, 0, N - m00.rows, 0, 0, cv::BORDER_CONSTANT, cv::Scalar(0));
+        // complex-conjugate symmetry output
+        cv::dft(m0, m1, cv::DFT_COMPLEX_OUTPUT);
+        // get real and complex parts
+        cv::extractChannel(m1, m2, 0);
+        cv::extractChannel(m1, m3, 1);
+        Mat phase(N, 1, CV_64FC1);
+        for (int i = 0; i < N; ++i) {
+            float im = static_cast<float>(m3.at<double>(i));
+            float re = static_cast<float>(m2.at<double>(i));
+            phase.at<double>(i, 0) = static_cast<double>(cv::fastAtan2(im, re));
+        }
+        // penalise phases far from odd multiples of 90
+        Mat phasePenalty = 90 - cv::abs(90 - cv::abs(180-phase));
+        // square each component
+        cv::multiply(m2, m2, m4);
+        cv::multiply(m3, m3, m5);
+        cv::sqrt(m4 + m5, m6);
+
+        //cv::mulSpectrums(m1, m1, m2, 0, false);
+        //cv::abs()
+        // square root and scale
+        //cv::sqrt(m2, m3);
+        cv::multiply(m6, 1.0/N, m6);
+        // only take a portion of the spectrum (low frequencies, up to w = 2*pi/N*7
+        // i.e. only look at periods down to 1/7 image width, as there are unlikely to be more than 7 columns
+        int maxColumns = 6;
+        Mat rectCutSpectrum = m6(cv::Rect(0, 0, 1, maxColumns+1));
+        Mat rectCutPhase = phase(cv::Rect(0, 0, 1, maxColumns+1));
+        Mat rectCutPhasePenalty = phasePenalty(cv::Rect(0, 0, 1, maxColumns+1));
+
+        // find the max, ignoring the zero-frequency amplitude.
+        //smoothedRectCutSpectrum.at<double>(0) = 0; // -> don't need this as we subtracted the mean above
+        int maxLoc[2]; // x, y
+        // minVal, maxVal, minLoc, maxLoc
+        cv::minMaxIdx(rectCutSpectrum, NULL, NULL, NULL, maxLoc);
+        cv::Ptr<Plot> plotSpectrum = makePlot(rectCutSpectrum, &image);
+        cv::Ptr<Plot> plotPhase = makePlot(rectCutPhasePenalty, &image, cv::Scalar(255, 0, 255));
+        Mat plotResultSpectrum, plotResultPhase; {
+            plotSpectrum->render(plotResultSpectrum);
+            plotPhase->render(plotResultPhase);
+        }
+        estimatedColumns = maxLoc[0];
+        printf("Estimated columns: %d\n", estimatedColumns);
+        showImage(0.3*plotResultSpectrum + 0.3*plotResultPhase + 0.4*rects);
+    }
+
+    // count number of peaks by sign counting, where the sign is taken relative to a threshold (3rd quartile?)
+    {
+
+    }
+
+    {
+        // now put horizontal centres of all wordBBs into a Mat and run kmeans
+        Mat wordBBcentroidX((int)allWordBBs.size(), 1, CV_64FC1);
+        printf("K means with centroid X values:\n");
+
+        for (auto i = 0; i < allWordBBs.size(); ++i) {
+            wordBB& w = allWordBBs[i];
+            double centroidX = w.x+w.width/2.0f;
+            wordBBcentroidX.at<double>(i, 0) = centroidX;
+            printf("%f, ", centroidX);
+        }
+        printf("\n");
+        cv::TermCriteria termCriteria(cv::TermCriteria::EPS + cv::TermCriteria::COUNT, 1000, 0.001);
+
+        /* Use EM Algorithm as slight generalisation of k-means, to allow different cluster sizes / column widths
+         * initialise with means (column centres) spread uniformly across width of image.
+         * (This wasn't easy to do with the k-means algorithm)
+         */
+        auto emAlg = cv::ml::EM::create();
+        emAlg->setClustersNumber(estimatedColumns);
+        //emAlg->setTermCriteria(termCriteria);
+        // since we're in 1D, COV_MAT_DIAGONAL (separate sigma for each dim)
+        // is equivalent to COV_MAT_SPHERICAL (all dims have same sigma)
+        emAlg->setCovarianceMatrixType(cv::ml::EM::Types::COV_MAT_SPHERICAL);
+        Mat initialMeans(estimatedColumns, 1, CV_64FC1);
+        for (auto i = 0; i < estimatedColumns; ++i) {
+            // want the centre (hence +0.5) of the ith column,
+            // when image is divided into estimatedColumns parts of equal width
+            double mixtureMean = (i+0.5)/estimatedColumns*image.cols;
+            printf("Mixture %d initial mean: %f\n", i, mixtureMean);
+            initialMeans.at<double>(i, 0) = mixtureMean;
+        }
+        // cluster samples around initial means
+        // don't provide initial covariance matrix estimates, or weights
+        /*
+         * signature:
+         * trainE(InputArray samples, InputArray means0, InputArray covs0, InputArray weights0,
+         *     OutputArray logLikelihoods, OutputArray labels, OutputArray probs)
+         */
+        Mat bestLabels;
+        emAlg->trainE(wordBBcentroidX, initialMeans, cv::noArray(), cv::noArray(), cv::noArray(), bestLabels);
+
+        Mat means = emAlg->getMeans();
+        for (int i = 0; i < estimatedColumns; ++i) {
+            printf("Mixture %d: mean=%f\n", i, means.at<double>(i));
+        }
+
+        /*
+        //Mat outputCentres;
+        cv::kmeans(wordBBcentroidX, estimatedColumns, bestLabels, termCriteria, 3, cv::KMEANS_PP_CENTERS, outputCentres);
+        */
+        // apply column labels
+        for (auto i = 0; i < (int) allWordBBs.size(); ++i) {
+            int column = bestLabels.at<int>(i);
+            printf("Label for wordBB %d: %d\n", i, bestLabels.at<int>(i));
+            allWordBBs[i].column = column;
+        }
     }
 
     // TODO find peaks/troughs (minimum values). Make sure that two peaks are 'distinct' enough in which boxes they separate
     // TODO once columns are decided, then classify words on either side by centroid location
 
+    {
+        Mat rects2 = overlayWords(binarised, allWordBBs, true);
+        showImage(rects2);
+    }
+
+    //  now find peak of spectrum and use that for kmeans
+
+
     for (auto& row : rows) {
-        for (cv::Rect wordBB : row) {
-            const char * wordText = getText(tesseractAPI, wordBB, /* printAndShow = */false);
+        for (wordBB& w : row) {
+            const char * wordText = getText(tesseractAPI, w, /* printAndShow = */false);
             delete[] wordText;
         }
     }
@@ -349,7 +472,7 @@ int tesseractInit(tesseract::TessBaseAPI& baseAPI) {
 
 // text must be delete[]d after use.
 // API must be initialised with image
-const char * getText(tesseract::TessBaseAPI& tesseractAPI, cv::Rect roi, bool printAndShow) {
+const char * getText(tesseract::TessBaseAPI& tesseractAPI, wordBB roi, bool printAndShow) {
     tesseractAPI.SetRectangle(roi.x, roi.y, roi.width, roi.height);
 
     /*

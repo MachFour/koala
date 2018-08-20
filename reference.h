@@ -6,12 +6,15 @@
 #define REFERENCE_H
 
 #include <opencv2/opencv.hpp>
+#include <opencv2/plot.hpp>
 #include <leptonica/allheaders.h>
 #include "meanshift.h"
 #include "ccomponent.h"
+#include "wordBB.h"
 #include "Interval.h"
 
 using Mat = cv::Mat;
+using Plot = cv::plot::Plot2d;
 template <typename T>
 using vector = std::vector<T>;
 
@@ -32,15 +35,18 @@ const static double VARIANCE_THRESHOLD = 0.1;
 
 void showCentroidClusters(const Mat&, const vector<ccCluster>&);
 void showRowBounds(const Mat&, const vector<ccCluster>&);
-Mat overlayRects(const Mat&, const vector<vector<cv::Rect>>&);
+Mat overlayWords(const Mat &image, const vector<vector<wordBB>> &words, bool colourByRowCol=false);
+Mat overlayWords(const Mat &image, const vector<wordBB> &allWordBBs, bool colourByRowCol=false);
 
 int findMedian(vector<int> numbers);
 cv::Rect findBoundingRect(const vector<Interval>&, const vector<CComponent>&, int maxHeight, int maxWidth);
 cv::Mat matFromPix1(PIX * pix);
+cv::Ptr<Plot>
+makePlot(const Mat &data, const Mat *resize = nullptr, cv::Scalar colour = cv::Scalar(0, 255, 255), int thickness = 7);
+
+Mat derivative(const Mat& src);
 
 // pseudo random RGB colours, for different numbers of parameters
-cv::Scalar pseudoRandomColour(int, int, int minVal = 96);
-cv::Scalar pseudoRandomColour(int, int, int, int, int minVal = 96);
 
 
 #endif //REFERENCE_H

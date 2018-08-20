@@ -5,6 +5,10 @@
 #ifndef REFERENCE_CCOMPONENT_H
 #define REFERENCE_CCOMPONENT_H
 
+/*
+ * Class to store all the connected component details/stats, as returned by
+ * opencv's connectedComponentsWithStats()
+ */
 struct CComponent {
     int left;
     int top;
