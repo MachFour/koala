@@ -22,10 +22,10 @@ struct wordBB {
     wordBB(int x, int y, int width, int height) :
         x(x), y(y), width(width), height(height), row(-1), column(-1), text("") {};
 
-    const int x;
-    const int y;
-    const int width;
-    const int height;
+    int x;
+    int y;
+    int width;
+    int height;
 
     int row;
     int column;

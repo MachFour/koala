@@ -5,7 +5,6 @@
 #include <opencv2/imgproc.hpp>
 #include <opencv2/plot.hpp>
 #include <opencv2/ml.hpp>
-//#include <opencv2/ximgproc.hpp>
 
 #include <tesseract/baseapi.h>
 #include <leptonica/allheaders.h>
@@ -14,6 +13,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cmath>
+#include <algorithm>
 
 #include "reference.h"
 #include "meanshift.h"
@@ -24,6 +24,10 @@ const int CENTROID_CLUSTER_BANDWIDTH = 20;
 const int MIN_CC_AREA = 80;
 const int MIN_COMBINED_RECT_AREA = 1000;
 const int MAX_COMBINED_RECT_AREA = 2000*1500/4;
+const int MIN_COMBINED_RECT_HEIGHT = 1500/150;
+const int MAX_COMBINED_RECT_HEIGHT = 1500/4;
+const int MIN_COMBINED_RECT_WIDTH = 2000/200;
+const int MAX_COMBINED_RECT_WIDTH = 2000/4;
 
 int tesseractInit(tesseract::TessBaseAPI&);
 const char * getText(tesseract::TessBaseAPI&, wordBB, bool printAndShow=false);
@@ -203,8 +207,13 @@ int main(int argc, char ** argv) {
         for (vector<Interval> &group : closeCCsInCluster) {
             wordBB w = wordBB(findBoundingRect(group, allCCs, image.rows, image.cols));
             // simple filtering
+            // remove unlikely sized 'words'
             int area = w.getArea();
-            if (area <= MIN_COMBINED_RECT_AREA || area > MAX_COMBINED_RECT_AREA) {
+            int height = w.height;
+            int width = w.width;
+            if (height <= MIN_COMBINED_RECT_HEIGHT || height > MAX_COMBINED_RECT_HEIGHT
+                    || width <= MIN_COMBINED_RECT_WIDTH //|| width > MAX_COMBINED_RECT_WIDTH
+                    || area <= MIN_COMBINED_RECT_AREA || area > MAX_COMBINED_RECT_AREA) {
                 continue;
             } else {
                 // add to rows
@@ -257,6 +266,7 @@ int main(int argc, char ** argv) {
             }
             for (wordBB& w : row) {
                 w.row = rowNum;
+
                 allWordBBs.push_back(w);
                 if (row.size() >= rectsPerRowQ1) {
                     // otherwise too few rows for accurate column number estimation is likely to be faulty
@@ -265,28 +275,38 @@ int main(int argc, char ** argv) {
             }
             rowNum++;
         }
+        // TODO colour by row
+        Mat rowRects = overlayWords(binarised, allWordBBs, false);
+        showImage(rowRects);
     }
+
+
     // this will count how many rects (from eligible rows) would be intersected by a cut at the given X coordinate
     //int * rectsCutByXCount = new int[image.cols];
     Mat rectsCutByXCount64F(image.cols, 1, CV_64FC1, cv::Scalar(0));
+    // need 8UC1 for median blur
     Mat rectsCutByXCount(image.cols, 1, CV_8UC1, cv::Scalar(0));
-    // this will count the total height of all rects (from eligible rows) that would be intersected by a cut at the given X coordinate
-    Mat totalRectHeightByXCoord(image.cols, 1, CV_64FC1, cv::Scalar(0));
     for (auto& wordBB : wordBBsforColumnInference) {
         for (int j = wordBB.x; j < wordBB.x + wordBB.width; ++j) {
-            rectsCutByXCount64F.at<double>(j)+= 1.0;
-            totalRectHeightByXCoord.at<double>(j) += (double) wordBB.height;
+            rectsCutByXCount64F.at<double>(j) += 1.0;
+            rectsCutByXCount.at<unsigned char>(j) += 1;
         }
     }
 
     Mat smoothedRectCutDensity;
+    Mat smoothedRectCutDensity32S;
     {
-        int blurSize = image.cols/32;
+        int blurSize = image.cols/16;
         if (blurSize % 2 == 0) {
             blurSize++;
         }
-        cv::GaussianBlur(rectsCutByXCount64F, smoothedRectCutDensity, cv::Size(blurSize, blurSize), 0, 0);
-        //cv::medianBlur(rectsCutByXCount64F, smoothedRectCutDensity, blurSize);
+        //cv::GaussianBlur(rectsCutByXCount64F, smoothedRectCutDensity, cv::Size(blurSize, blurSize), 0, 0);
+        {
+            Mat tmp;
+            cv::medianBlur(rectsCutByXCount, tmp, blurSize);
+            tmp.convertTo(smoothedRectCutDensity32S, CV_32SC1);
+            tmp.convertTo(smoothedRectCutDensity, CV_64FC1);
+        }
         //cv::normalize(smoothedRectCutDensity)
 
         cv::Ptr<Plot> plotCounts = makePlot(rectsCutByXCount64F, &image);
@@ -303,74 +323,46 @@ int main(int argc, char ** argv) {
     }
 
     int estimatedColumns;
-    /*
-     * Fourier transform the smoothed Rect Cut density and find the strongest peak,
-     * to estimate the number of columns
-     */
-    {
-        // first remove the mean from the function to get rid of 'DC' energy;
-        cv::Scalar avgVal = cv::mean(smoothedRectCutDensity);
-        Mat m00 = smoothedRectCutDensity - avgVal;
-        Mat m0, m1, m2, m3, m4, m5, m6;
-        int N = cv::getOptimalDFTSize(smoothedRectCutDensity.rows);
-        // pad with zeros
-        // copyMakeBorder(src, dest, top, bottom, left, right, borderType, fillValue)
-        cv::copyMakeBorder(m00, m0, 0, N - m00.rows, 0, 0, cv::BORDER_CONSTANT, cv::Scalar(0));
-        // complex-conjugate symmetry output
-        cv::dft(m0, m1, cv::DFT_COMPLEX_OUTPUT);
-        // get real and complex parts
-        cv::extractChannel(m1, m2, 0);
-        cv::extractChannel(m1, m3, 1);
-        Mat phase(N, 1, CV_64FC1);
-        for (int i = 0; i < N; ++i) {
-            float im = static_cast<float>(m3.at<double>(i));
-            float re = static_cast<float>(m2.at<double>(i));
-            phase.at<double>(i, 0) = static_cast<double>(cv::fastAtan2(im, re));
-        }
-        // penalise phases far from odd multiples of 90
-        Mat phasePenalty = 90 - cv::abs(90 - cv::abs(180-phase));
-        // square each component
-        cv::multiply(m2, m2, m4);
-        cv::multiply(m3, m3, m5);
-        cv::sqrt(m4 + m5, m6);
-
-        //cv::mulSpectrums(m1, m1, m2, 0, false);
-        //cv::abs()
-        // square root and scale
-        //cv::sqrt(m2, m3);
-        cv::multiply(m6, 1.0/N, m6);
-        // only take a portion of the spectrum (low frequencies, up to w = 2*pi/N*7
-        // i.e. only look at periods down to 1/7 image width, as there are unlikely to be more than 7 columns
-        int maxColumns = 6;
-        Mat rectCutSpectrum = m6(cv::Rect(0, 0, 1, maxColumns+1));
-        Mat rectCutPhase = phase(cv::Rect(0, 0, 1, maxColumns+1));
-        Mat rectCutPhasePenalty = phasePenalty(cv::Rect(0, 0, 1, maxColumns+1));
-
-        // find the max, ignoring the zero-frequency amplitude.
-        //smoothedRectCutSpectrum.at<double>(0) = 0; // -> don't need this as we subtracted the mean above
-        int maxLoc[2]; // x, y
-        // minVal, maxVal, minLoc, maxLoc
-        cv::minMaxIdx(rectCutSpectrum, NULL, NULL, NULL, maxLoc);
-        cv::Ptr<Plot> plotSpectrum = makePlot(rectCutSpectrum, &image);
-        cv::Ptr<Plot> plotPhase = makePlot(rectCutPhasePenalty, &image, cv::Scalar(255, 0, 255));
-        Mat plotResultSpectrum, plotResultPhase; {
-            plotSpectrum->render(plotResultSpectrum);
-            plotPhase->render(plotResultPhase);
-        }
-        estimatedColumns = maxLoc[0];
-        printf("Estimated columns: %d\n", estimatedColumns);
-        showImage(0.3*plotResultSpectrum + 0.3*plotResultPhase + 0.4*rects);
-    }
 
     // count number of peaks by sign counting, where the sign is taken relative to a threshold (3rd quartile?)
     {
-
+        Mat m0;
+        cv::sort(smoothedRectCutDensity32S, m0, cv::SORT_ASCENDING | cv::SORT_EVERY_COLUMN);
+        int n = smoothedRectCutDensity32S.rows;
+        int q3 = m0.at<int>(n*3/4);
+        Mat m1 = smoothedRectCutDensity32S - q3;
+        // count peaks by sign changes in m1
+        int peaks = 0;
+        bool inPeak = false;
+        for (int i = 1; i < m1.rows; ++i) {
+            bool aboveThreshold = (m1.at<int>(i) > 0);
+            if (aboveThreshold && !inPeak) {
+                // just 'found' a new peak
+                peaks++;
+            }
+            inPeak = aboveThreshold;
+        }
+        estimatedColumns = peaks;
+        printf("Estimated columns by sign counting: %d\n", estimatedColumns);
+        cv::Ptr<Plot> plotThreshold = makePlot(smoothedRectCutDensity, &image);
+        Mat plotResultThresh; {
+            plotThreshold->render(plotResultThresh);
+            // draw q3 as a line on the image
+            // need to calculate its y coordinate, given that the plot's original height was equal to
+            // max(smoothedCutRectDensity), but was rescaled to have height equal to the original image
+            double maxVal;
+            cv::minMaxIdx(smoothedRectCutDensity, NULL, &maxVal);
+            // subtract from 1.0 to get threshold referred to bottom of image, not top
+            int thresholdYCoord = static_cast<int>((1.0 - q3/maxVal)*plotResultThresh.rows);
+            cv::rectangle(plotResultThresh, cv::Rect(0, thresholdYCoord, plotResultThresh.cols-1, 1), 255, 5);
+        }
+        showImage(0.5*plotResultThresh + 0.5*rects);
     }
 
     {
         // now put horizontal centres of all wordBBs into a Mat and run kmeans
         Mat wordBBcentroidX((int)allWordBBs.size(), 1, CV_64FC1);
-        printf("K means with centroid X values:\n");
+        printf("Mixture model with %d components and centroid X values:\n", estimatedColumns);
 
         for (auto i = 0; i < allWordBBs.size(); ++i) {
             wordBB& w = allWordBBs[i];
@@ -421,7 +413,7 @@ int main(int argc, char ** argv) {
         // apply column labels
         for (auto i = 0; i < (int) allWordBBs.size(); ++i) {
             int column = bestLabels.at<int>(i);
-            printf("Label for wordBB %d: %d\n", i, bestLabels.at<int>(i));
+            //printf("Label for wordBB %d: %d\n", i, bestLabels.at<int>(i));
             allWordBBs[i].column = column;
         }
     }
@@ -436,11 +428,51 @@ int main(int argc, char ** argv) {
 
     //  now find peak of spectrum and use that for kmeans
 
+    // sort by row, then by column, then by x coordinate
+    std::sort(allWordBBs.begin(), allWordBBs.end(), [](const wordBB& a, const wordBB& b) -> bool {
+        // want to check whether a < b
+        if (a.row != b.row) {
+            return a.row < b.row;
+        } else if (a.column != b.column) {
+            return a.column < b.column;
+        } else {
+            return a.x < b.x;
+        }
+    });
 
-    for (auto& row : rows) {
-        for (wordBB& w : row) {
-            const char * wordText = getText(tesseractAPI, w, /* printAndShow = */false);
-            delete[] wordText;
+    for (wordBB& w : allWordBBs) {
+        const char * wordText = getText(tesseractAPI, w, /* printAndShow = */false);
+        w.text = std::string(wordText);
+        // remove newlines
+        w.text.erase(remove(w.text.begin(), w.text.end(), '\n'), w.text.end());
+        w.text.shrink_to_fit();
+        delete[] wordText;
+    }
+
+    // print to console
+    {
+        printf("\n\n");
+        int currentRow = 0;
+        int currentColumn = 0;
+        int currentColumnChars = 0;
+        for (const wordBB& w : allWordBBs) {
+            if (currentRow != w.row) {
+                printf("\n");
+                currentRow = w.row;
+                currentColumn = 0;
+                currentColumnChars = 0;
+            } else if (currentColumn != w.column) {
+                // end column, pad out to 40 chars
+                for (int i = 0; i + currentColumnChars < 30; ++i) {
+                    putchar(' ');
+                }
+                putchar('|');
+                putchar(' ');
+                currentColumn = w.column;
+                currentColumnChars = 0;
+            }
+            currentColumnChars += w.text.length() + 1;
+            printf("%s ", w.text.data());
         }
     }
 
