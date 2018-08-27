@@ -296,7 +296,7 @@ int main(int argc, char ** argv) {
     Mat smoothedRectCutDensity;
     Mat smoothedRectCutDensity32S;
     {
-        int blurSize = image.cols/16;
+        int blurSize = image.cols/8;
         if (blurSize % 2 == 0) {
             blurSize++;
         }
@@ -335,12 +335,12 @@ int main(int argc, char ** argv) {
         int peaks = 0;
         bool inPeak = false;
         for (int i = 1; i < m1.rows; ++i) {
-            bool aboveThreshold = (m1.at<int>(i) > 0);
-            if (aboveThreshold && !inPeak) {
+            bool atThreshold = (m1.at<int>(i) >= 0);
+            if (atThreshold && !inPeak) {
                 // just 'found' a new peak
                 peaks++;
             }
-            inPeak = aboveThreshold;
+            inPeak = atThreshold;
         }
         estimatedColumns = peaks;
         printf("Estimated columns by sign counting: %d\n", estimatedColumns);
@@ -405,6 +405,14 @@ int main(int argc, char ** argv) {
         for (int i = 0; i < estimatedColumns; ++i) {
             printf("Mixture %d: mean=%f\n", i, means.at<double>(i));
         }
+        /* Labels might not be in order of left-to-right columns, so we need to create this mapping */
+        vector<int> mixtureLabelToColumn;
+        for (int i = 0; i < estimatedColumns; ++i) {
+            mixtureLabelToColumn.push_back(i);
+        }
+        std::sort(mixtureLabelToColumn.begin(), mixtureLabelToColumn.end(), [&means](int a, int b) -> bool {
+            return means.at<double>(a) < means.at<double>(b);
+        });
 
         /*
         //Mat outputCentres;
@@ -412,7 +420,7 @@ int main(int argc, char ** argv) {
         */
         // apply column labels
         for (auto i = 0; i < (int) allWordBBs.size(); ++i) {
-            int column = bestLabels.at<int>(i);
+            int column = mixtureLabelToColumn[bestLabels.at<int>(i)];
             //printf("Label for wordBB %d: %d\n", i, bestLabels.at<int>(i));
             allWordBBs[i].column = column;
         }
@@ -446,6 +454,7 @@ int main(int argc, char ** argv) {
         // remove newlines
         w.text.erase(remove(w.text.begin(), w.text.end(), '\n'), w.text.end());
         w.text.shrink_to_fit();
+        printf("Text found: '%s'\n", w.text.data());
         delete[] wordText;
     }
 
@@ -459,21 +468,27 @@ int main(int argc, char ** argv) {
             if (currentRow != w.row) {
                 printf("\n");
                 currentRow = w.row;
+                // new column might not be zero
+                currentColumnChars = 0;
                 currentColumn = 0;
-                currentColumnChars = 0;
-            } else if (currentColumn != w.column) {
-                // end column, pad out to 40 chars
-                for (int i = 0; i + currentColumnChars < 30; ++i) {
+            }
+            if (currentColumn != w.column) {
+                assert (currentColumn < w.column); // should always be true after sorting
+                for (int col = currentColumn; col < w.column; ++col) {
+                    // end column, pad out to 40 chars
+                    for (int i = 0; i + currentColumnChars < 30; ++i) {
+                        putchar(' ');
+                    }
+                    putchar('|');
                     putchar(' ');
+                    currentColumnChars = 0;
                 }
-                putchar('|');
-                putchar(' ');
                 currentColumn = w.column;
-                currentColumnChars = 0;
             }
             currentColumnChars += w.text.length() + 1;
             printf("%s ", w.text.data());
         }
+        printf("\n");
     }
 
     // TODO Contour / line detection
