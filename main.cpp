@@ -300,10 +300,10 @@ int main(int argc, char ** argv) {
         if (blurSize % 2 == 0) {
             blurSize++;
         }
-        //cv::GaussianBlur(rectsCutByXCount64F, smoothedRectCutDensity, cv::Size(blurSize, blurSize), 0, 0);
         {
             Mat tmp;
-            cv::medianBlur(rectsCutByXCount, tmp, blurSize);
+            cv::GaussianBlur(rectsCutByXCount64F, tmp, cv::Size(blurSize, blurSize), 0, 0);
+            //cv::medianBlur(rectsCutByXCount, tmp, blurSize);
             tmp.convertTo(smoothedRectCutDensity32S, CV_32SC1);
             tmp.convertTo(smoothedRectCutDensity, CV_64FC1);
         }
