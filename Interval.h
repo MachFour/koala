@@ -8,7 +8,7 @@
 #include <vector>
 #include <cmath>
 
-template <typename T>
+template<typename T>
 using vector = std::vector<T>;
 
 class Interval {
@@ -50,4 +50,4 @@ private:
 
 };
 
-#endif //REFERENCE_INdoubleERVAL_H
+#endif //REFERENCE_INTERVAL_H

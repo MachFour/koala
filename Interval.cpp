@@ -6,6 +6,8 @@
 #include <algorithm>
 #include "Interval.h"
 
+template <typename T>
+using vector = std::vector<T>;
 
 bool Interval::areClose(const Interval &i1, const Interval &i2, double expand, ExpandType method) {
     double dist = distance(i1.midpoint, i2.midpoint);

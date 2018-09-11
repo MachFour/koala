@@ -2,7 +2,12 @@
 // Created by max on 8/3/18.
 //
 
+#ifndef REFERENCE_ANDROID
 #include <leptonica/allheaders.h>
+#else
+#include <allheaders.h>
+#endif
+
 
 #include <vector>
 #include <algorithm>
@@ -11,6 +16,8 @@
 #include "ccomponent.h"
 #include "Interval.h"
 #include "randomColour.h"
+#include "utils.h"
+
 
 void drawCC(Mat& img, const CComponent& cc, cv::Scalar colour) {
     //int area = stats.at<int>(which, cv::CC_STAT_AREA);
@@ -30,7 +37,7 @@ void drawCC(Mat& img, const CComponent& cc, cv::Scalar colour) {
      */
     //cv::drawMarker(img, cv::Point(centroidX, centroidY), /*colour=*/255, cv::MARKER_TILTED_CROSS, /*getSize=*/20, /*thickness=*/3);
     //int thickness = static_cast<int>(1+log(area));
-    cv::rectangle(img, cv::Point(cc.left, cc.top), cv::Point(cc.left+cc.width, cc.top+cc.height), colour, /*thickness=*/5);
+    cv::rectangle(img, cv::Point(cc.left, cc.top), cv::Point(cc.left + cc.width, cc.top + cc.height), colour, /*thickness=*/5);
 
 
 }
@@ -47,10 +54,10 @@ cv::Rect findBoundingRect(const vector<Interval>& intervals, const vector<CCompo
         int height = allCCs[label].height;
         int width = allCCs[label].width;
         int left = allCCs[label].left;
-        minTop = cv::min(top, minTop);
-        minLeft = cv::min(left, minLeft);
-        maxBottom = cv::max(top+height, maxBottom);
-        maxRight = cv::max(left+width, maxRight);
+        minTop = std::min(top, minTop);
+        minLeft = std::min(left, minLeft);
+        maxBottom = std::max(top + height, maxBottom);
+        maxRight = std::max(left + width, maxRight);
     }
     // left(x), top(y), width, height
     int rectHeight = maxBottom - minTop;
@@ -60,8 +67,8 @@ cv::Rect findBoundingRect(const vector<Interval>& intervals, const vector<CCompo
     return cv::Rect(minLeft, minTop, rectWidth, rectHeight);
 }
 
-std::string type2str(int type) {
-    std::string r;
+std::__cxx11::string type2str(int type) {
+    std::__cxx11::string r;
 
     int depth = type & CV_MAT_DEPTH_MASK;
     int chans = 1 + (type >> CV_CN_SHIFT);
@@ -87,9 +94,10 @@ Mat structuringElement(int size, cv::MorphShapes shape) {
     // point (-1, -1) represents centred structuring element
     return structuringElement(size, size, shape);
 }
+
 Mat structuringElement(int width, int height, cv::MorphShapes shape) {
     // point (-1, -1) represents centred structuring element
-    return cv::getStructuringElement(shape, cv::Size(width, height) /*, cv::point anchor = cv::point(-1, -1) */);
+    return getStructuringElement(shape, cv::Size(width, height) /*, cv::point anchor = cv::point(-1, -1) */);
 }
 
 void showImage(const Mat& img) {
@@ -101,7 +109,7 @@ int findMedian(vector<int> numbers) {
     if (n <= 0) {
         return 0;
     }
-    std::sort(numbers.begin(), numbers.end());
+    sort(numbers.begin(), numbers.end());
 
     if (n % 2 == 1) {
         // n == 5 -> return numbers[2]
@@ -120,7 +128,7 @@ void showCentroidClusters(const Mat& image, const vector<ccCluster>& clustersByC
     cv::cvtColor(image, clusteredCCs, CV_GRAY2BGR);
     for (const ccCluster &c : clustersByCentroid) {
         // pick a pseudorandom nice colour
-        cv::Scalar colour = pseudoRandomColour(13* c.getSize(), ((int)c.getMode()[0]) % 157);
+        cv::Scalar colour = pseudoRandomColour(13 * c.getSize(), ((int)c.getMode()[0]) % 157);
         for (CComponent cc : c.getData()) {
             drawCC(clusteredCCs, cc, colour);
         }
@@ -138,11 +146,11 @@ void showRowBounds(const Mat& image, const vector<ccCluster>& clustersByCentroid
     for (const ccCluster &c : clustersByCentroid) {
         int minY = image.rows;
         int maxY = 0;
-        int clusterSize = static_cast<int>(c.getSize());
-        maxSize = cv::max(clusterSize, maxSize);
+        int clusterSize = c.getSize();
+        maxSize = std::max(clusterSize, maxSize);
         for (const CComponent& cc : c.getData()) {
-            minY = cv::min(minY, cc.top);
-            maxY = cv::max(maxY, cc.top + cc.height);
+            minY = std::min(minY, cc.top);
+            maxY = std::max(maxY, cc.top + cc.height);
         }
         // rect parameters: x, y, width, height
         // we'll use width for getSize, height for height
@@ -155,7 +163,7 @@ void showRowBounds(const Mat& image, const vector<ccCluster>& clustersByCentroid
     for (cv::Rect& r : rowBounds) {
         // choose colour
         // make width proportional to relative getSize of cluster
-        int width = static_cast<int>(round(((double)r.width/maxSize)*rowsImg.cols));
+        int width = static_cast<int>(round(((double)r.width / maxSize) * rowsImg.cols));
         int top = r.y;
         int bottom = r.y + r.height;
         cv::rectangle(rowsImg, cv::Point(0, top), cv::Point(width, bottom), pseudoRandomColour(width, top), 5);
@@ -182,7 +190,6 @@ Mat overlayWords(const Mat &image, const vector<wordBB> &allWordBBs, bool colour
     }
     return rectImg;
 }
-
 
 // returns 8-bit single channel Mat from corresponding binary pix image
 cv::Mat matFromPix1(PIX * pix) {
@@ -212,24 +219,10 @@ Mat derivative(const Mat& src) {
     return deriv;
 }
 
-cv::Ptr<Plot> makePlot(const Mat &data, const Mat *resize, cv::Scalar colour, int thickness) {
-    cv::Ptr<Plot> plot = Plot::create(data);
-    plot->setNeedPlotLine(true);
-    plot->setShowGrid(false);
-    plot->setPlotLineWidth(thickness);
-    plot->setPlotLineColor(colour);
-    if (resize != nullptr) {
-        plot->setPlotSize(resize->cols, resize->rows);
-    }
-    plot->setInvertOrientation(true);
-
-    return plot;
-}
-
 int saveOrShowImage(const Mat& img, const char * outFile) {
     bool isForDisplay = strcmp(outFile, "show") == 0;
     if (isForDisplay) {
-        cv::namedWindow("output", cv::WINDOW_NORMAL);
+        namedWindow("output", cv::WINDOW_NORMAL);
         cv::imshow("output", img);
         cv::resizeWindow("output", 1024, 768);
         cv::waitKey(0);

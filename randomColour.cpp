@@ -2,7 +2,6 @@
 // Created by max on 8/19/18.
 //
 
-
 #include "randomColour.h"
 
 cv::Scalar pseudoRandomColour(int a, int b, int c, int d, int minVal) {
@@ -16,10 +15,8 @@ cv::Scalar pseudoRandomColour(int a, int b, int c, int d, int minVal) {
 
 cv::Scalar pseudoRandomColour(int a, int b, int minVal) {
     return pseudoRandomColour(a, b, 19*a, 13*b, minVal);
-
 }
 
 cv::Scalar pseudoRandomColour(int a) {
     return pseudoRandomColour(1+a, 10 + a, 50+a, 200+a);
-
 }
