@@ -5,7 +5,7 @@
 #ifndef REFERENCE_H
 #define REFERENCE_H
 
-#include <opencv2/opencv.hpp>
+#include <opencv2/core.hpp>
 #include "table.h"
 
 const static int BLUR_SIZE = 3;

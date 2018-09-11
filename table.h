@@ -5,9 +5,14 @@
 #ifndef REFERENCE_TABLE_H
 #define REFERENCE_TABLE_H
 
-#include <iostream>
 #include <vector>
 #include <string>
+
+#ifndef REFERENCE_ANDROID
+#include <cstdio>
+#else
+#include <android/log.h>
+#endif
 
 class Table {
 public:
@@ -17,20 +22,19 @@ public:
         // takes into account padding characters
 
         int realMinColWidth = minColumnWidth - 2;
-        printf("\n\n");
+        outString("\n\n");
         for (const std::vector<std::string>& column : rows) {
             for (const std::string& cell : column) {
                 if (!cell.empty()) {
-                    printf("%s", cell.data());
+                    outString(cell);
                 }
                 int fillChars = max(0, realMinColWidth - (unsigned int) cell.length());
                 for (int i = 0; i < fillChars; ++i) {
-                    putchar(' ');
+                    outString(" ");
                 }
-                putchar('|');
-                putchar(' ');
+                outString("| ");
             }
-            printf("\n");
+            outString("\n");
         }
     }
 
@@ -65,6 +69,15 @@ private:
     static int max(int a, int b) {
         return a >= b ? a : b;
     }
+
+    static void outString(const std::string& s) {
+#ifdef REFERENCE_ANDROID
+        __android_log_write(ANDROID_LOG_DEBUG, "KTable", s.data());
+#else
+        printf("%s", s.data());
+#endif
+    }
+
 };
 
 #endif //REFERENCE_TABLE_H

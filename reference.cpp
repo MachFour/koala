@@ -5,15 +5,13 @@
 
 //#include <opencv2/opencv.hpp>
 #include <opencv2/core.hpp>
-#include <opencv2/highgui.hpp>
-#include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
 #include <opencv2/ml.hpp>
 
 // android build uses different header files
 #ifdef REFERENCE_ANDROID
 #include <baseapi.h>
-    #include <allheaders.h>
+#include <allheaders.h>
 #else
 #include <tesseract/baseapi.h>
 #include <leptonica/allheaders.h>
@@ -44,8 +42,8 @@ const int MAX_COMBINED_RECT_HEIGHT = 1500/4;
 const int MIN_COMBINED_RECT_WIDTH = 2000/200;
 //const int MAX_COMBINED_RECT_WIDTH = 2000/4;
 
-int tesseractInit(tesseract::TessBaseAPI&);
-const char * getText(tesseract::TessBaseAPI&, wordBB, bool printAndShow=false);
+int tesseractInit(tesseract::TessBaseAPI& baseApi);
+const char * getText(tesseract::TessBaseAPI&, wordBB w, bool printAndShow=false);
 
 Table tableExtract(const Mat &image) {
     Mat preprocessed;
@@ -493,7 +491,7 @@ Table tableExtract(const Mat &image) {
     }
 
     // TODO Contour / line detection
-    saveOrShowImage(binarised, "show");
+    showImage(binarised);
     return t;
 }
 
@@ -520,8 +518,8 @@ int tesseractInit(tesseract::TessBaseAPI& baseAPI) {
 
 // text must be delete[]d after use.
 // API must be initialised with image
-const char * getText(tesseract::TessBaseAPI& tesseractAPI, wordBB roi, bool printAndShow) {
-    tesseractAPI.SetRectangle(roi.x, roi.y, roi.width, roi.height);
+const char * getText(tesseract::TessBaseAPI& tesseractAPI, wordBB w, bool printAndShow) {
+    tesseractAPI.SetRectangle(w.x, w.y, w.width, w.height);
 
     /*
     // now combine each set of close CCs into an image

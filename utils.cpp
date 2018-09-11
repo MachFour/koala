@@ -2,6 +2,10 @@
 // Created by max on 8/3/18.
 //
 
+#include <opencv2/core.hpp>
+#include <opencv2/highgui.hpp>
+#include <opencv2/imgcodecs.hpp>
+
 #ifndef REFERENCE_ANDROID
 #include <leptonica/allheaders.h>
 #else
@@ -67,8 +71,8 @@ cv::Rect findBoundingRect(const vector<Interval>& intervals, const vector<CCompo
     return cv::Rect(minLeft, minTop, rectWidth, rectHeight);
 }
 
-std::__cxx11::string type2str(int type) {
-    std::__cxx11::string r;
+std::string type2str(int type) {
+    std::string r;
 
     int depth = type & CV_MAT_DEPTH_MASK;
     int chans = 1 + (type >> CV_CN_SHIFT);
@@ -98,10 +102,6 @@ Mat structuringElement(int size, cv::MorphShapes shape) {
 Mat structuringElement(int width, int height, cv::MorphShapes shape) {
     // point (-1, -1) represents centred structuring element
     return getStructuringElement(shape, cv::Size(width, height) /*, cv::point anchor = cv::point(-1, -1) */);
-}
-
-void showImage(const Mat& img) {
-    saveOrShowImage(img, "show");
 }
 
 int findMedian(vector<int> numbers) {
@@ -219,6 +219,12 @@ Mat derivative(const Mat& src) {
     return deriv;
 }
 
+void showImage(const Mat& img) {
+#ifndef REFERENCE_ANDROID
+    saveOrShowImage(img, "show");
+#endif
+}
+
 int saveOrShowImage(const Mat& img, const char * outFile) {
     bool isForDisplay = strcmp(outFile, "show") == 0;
     if (isForDisplay) {
@@ -231,7 +237,7 @@ int saveOrShowImage(const Mat& img, const char * outFile) {
 
     bool result = true;
     try {
-        result &= cv::imwrite(outFile, img);
+        //result &= cv::imwrite(outFile, img);
     } catch (const cv::Exception& ex) {
         fprintf(stderr, "exception writing images: %s\n", ex.what());
     }
