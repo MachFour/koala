@@ -6,11 +6,6 @@
 #include <opencv2/highgui.hpp>
 #include <opencv2/imgcodecs.hpp>
 
-#ifndef REFERENCE_ANDROID
-#include <leptonica/allheaders.h>
-#else
-#include <allheaders.h>
-#endif
 
 
 #include <vector>
@@ -191,22 +186,6 @@ Mat overlayWords(const Mat &image, const vector<wordBB> &allWordBBs, bool colour
     return rectImg;
 }
 
-// returns 8-bit single channel Mat from corresponding binary pix image
-cv::Mat matFromPix1(PIX * pix) {
-    Mat mat(pix->h, pix->w, CV_8UC1);
-    // loop inspired by function ImageThresholder::SetImage from src/ccmain/thresholder.cpp of Tesseract
-    // located at: https://github.com/tesseract-ocr/tesseract/tree/master/src/ccmain/thresholder.cpp
-
-    l_uint32* data = pixGetData(pix);
-    int wpl = pixGetWpl(pix);
-    for (unsigned int y = 0; y < pix->h; ++y, data += wpl) {
-        for (unsigned int x = 0; x < pix->w; ++x) {
-            mat.at<unsigned char>(y, x) = (unsigned char) (GET_DATA_BIT(data, x) ? 255 : 0);
-        }
-    }
-    return mat;
-}
-
 // element-wise derivative/difference along first dimension
 // matrix must be CV_64F
 Mat derivative(const Mat& src) {
@@ -221,31 +200,24 @@ Mat derivative(const Mat& src) {
 
 void showImage(const Mat& img) {
 #ifndef REFERENCE_ANDROID
-    saveOrShowImage(img, "show");
+    namedWindow("output", cv::WINDOW_NORMAL);
+    cv::imshow("output", img);
+    cv::resizeWindow("output", 1024, 768);
+    cv::waitKey(0);
 #endif
 }
 
-int saveOrShowImage(const Mat& img, const char * outFile) {
-    bool isForDisplay = strcmp(outFile, "show") == 0;
-    if (isForDisplay) {
-        namedWindow("output", cv::WINDOW_NORMAL);
-        cv::imshow("output", img);
-        cv::resizeWindow("output", 1024, 768);
-        cv::waitKey(0);
-        return 0;
-    } // else {
-
-    bool result = true;
+int saveImage(const Mat &img, const char *outFile) {
+    bool result = false;
     try {
-        //result &= cv::imwrite(outFile, img);
+        result |= cv::imwrite(outFile, img);
+        if (!result) {
+            fprintf(stderr, "Error saving images\n");
+        }
     } catch (const cv::Exception& ex) {
         fprintf(stderr, "exception writing images: %s\n", ex.what());
     }
 
-    if (!result) {
-        fprintf(stderr, "Error saving images\n");
-        return 1;
-    } else {
-        return 0;
-    }
+    // result = true -> return 0 for no error
+    return !result;
 }

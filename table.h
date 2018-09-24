@@ -8,9 +8,8 @@
 #include <vector>
 #include <string>
 
-#ifndef REFERENCE_ANDROID
 #include <cstdio>
-#else
+#ifdef REFERENCE_ANDROID
 #include <android/log.h>
 #endif
 
@@ -18,24 +17,35 @@ class Table {
 public:
     Table(size_t maxColumns) : maxColumns(maxColumns) {};
 
-    void print(unsigned int minColumnWidth) const {
+    // column separators become '\f' characters
+    std::string parseableString(const char * colSep = "\f") const {
         // takes into account padding characters
-
-        int realMinColWidth = minColumnWidth - 2;
-        outString("\n\n");
+        std::string outStr;
         for (const std::vector<std::string>& column : rows) {
             for (const std::string& cell : column) {
-                if (!cell.empty()) {
-                    outString(cell);
-                }
-                int fillChars = max(0, realMinColWidth - (unsigned int) cell.length());
-                for (int i = 0; i < fillChars; ++i) {
-                    outString(" ");
-                }
-                outString("| ");
+                outStr.append(cell);
+                outStr.append(colSep);
             }
-            outString("\n");
+            // replace last column separator with newline to mark end of row
+            outStr.back() = '\n';
         }
+        return outStr;
+    }
+
+    std::string printableString(unsigned int minColumnWidth) const {
+        std::string outStr("\n\n");
+        // takes into account padding characters
+        int realMinColWidth = minColumnWidth - 2;
+        for (const std::vector<std::string>& column : rows) {
+            for (const std::string& cell : column) {
+                outStr.append(cell);
+                auto fillChars = rectifiedDifference(realMinColWidth, (int) cell.length());
+                outStr.append(fillChars, ' ');
+                outStr.append("| ");
+            }
+            outStr.append("\n");
+        }
+        return outStr;
     }
 
     size_t numRows() const {
@@ -66,18 +76,9 @@ private:
     size_t maxColumns;
     std::vector<std::vector<std::string>> rows;
 
-    static int max(int a, int b) {
-        return a >= b ? a : b;
+    static unsigned int rectifiedDifference(int a, int b) {
+        return a - b <= 0 ? 0 : (unsigned int)(a - b);
     }
-
-    static void outString(const std::string& s) {
-#ifdef REFERENCE_ANDROID
-        __android_log_write(ANDROID_LOG_DEBUG, "KTable", s.data());
-#else
-        printf("%s", s.data());
-#endif
-    }
-
 };
 
 #endif //REFERENCE_TABLE_H

@@ -30,24 +30,64 @@
 #include "plotutils.h"
 #include "table.h"
 #include "utils.h"
+#include "ocrutils.h"
 #include "wordBB.h"
 
+int min(int a, int b) {
+    return a <= b ? a : b;
+}
+int max(int a, int b) {
+    return a >= b ? a : b;
+}
 
-const int CENTROID_CLUSTER_BANDWIDTH = 20;
-const int MIN_CC_AREA = 80;
+// global parameters in terms of the size of the input image
+
+// const int CENTROID_CLUSTER_BANDWIDTH = 20;
+int centroidClusterBandwidth(int w, int h) {
+    return min(w, h)/75;
+}
+
+
+//const int MIN_CC_AREA = 80;
+int minCCArea(int w, int h) {
+    return max(10, w*h/37500);
+}
+
+/*
 const int MIN_COMBINED_RECT_AREA = 1000;
 const int MAX_COMBINED_RECT_AREA = 2000*1500/4;
 const int MIN_COMBINED_RECT_HEIGHT = 1500/150;
 const int MAX_COMBINED_RECT_HEIGHT = 1500/4;
 const int MIN_COMBINED_RECT_WIDTH = 2000/200;
-//const int MAX_COMBINED_RECT_WIDTH = 2000/4;
+const int MAX_COMBINED_RECT_WIDTH = 2000/4;
+ */
+bool isPlausibleWordBBSize(const wordBB& w, int imgW, int imgH) {
+    int imageArea = imgW*imgH;
+    int wordArea = w.getArea();
+    int wordW = w.width;
+    int wordH = w.height;
+    int minArea = imageArea/3000;
+    int maxArea = imageArea/4;
+    int minHeight = imgH/150;
+    int maxHeight = imgH/4;
+    int minWidth = imgW/200;
+    //int maxWidth = imgW/4;
 
-int tesseractInit(tesseract::TessBaseAPI& baseApi);
-const char * getText(tesseract::TessBaseAPI&, wordBB w, bool printAndShow=false);
+    return wordW >= minWidth && wordH >= minHeight && wordArea >= minArea
+    /*&& wordW <= maxWidth */&& wordH <= maxHeight && wordArea <= maxArea;
+}
 
-Table tableExtract(const Mat &image) {
+
+Table tableExtract(const Mat &image, tesseract::TessBaseAPI& tesseractAPI, cv::Mat * wordBBImg) {
+    Mat grey;
     Mat preprocessed;
-    image.convertTo(preprocessed, CV_8UC1);
+#ifdef REFERENCE_ANDROID
+    // android images are RGBA after decoding
+    cv::cvtColor(image, grey, CV_RGBA2GRAY);
+#else
+    grey = image;
+#endif
+    grey.convertTo(preprocessed, CV_8UC1);
 
     // do dumb threshold to figure out whether it's white on black or black on white text, and invert if necessary
     Mat dumbThreshold;
@@ -60,8 +100,9 @@ Table tableExtract(const Mat &image) {
 
     // another strategy from https://stackoverflow.com/questions/10196198/how-to-remove-convexity-defects-in-a-sudoku-square
     // to have uniform brightness, divide image by result of closure than subtract the result, divide it
-    morphologyEx(preprocessed, preprocessed, cv::MorphTypes::MORPH_BLACKHAT, structuringElement(100
-                                                                                                , cv::MORPH_ELLIPSE));
+    int blackhatKSize = MIN(image.rows, image.cols)/15;
+    cv::Mat sElement = structuringElement(blackhatKSize, cv::MORPH_ELLIPSE);
+    morphologyEx(preprocessed, preprocessed, cv::MorphTypes::MORPH_BLACKHAT, sElement);
     cv::normalize(preprocessed, preprocessed, 0, 255, cv::NORM_MINMAX);
 
     //clean it up a bit?
@@ -106,7 +147,7 @@ Table tableExtract(const Mat &image) {
     vector<meanShift::Point<CComponent>> yCentroids;
     Mat allComponents = binarised.clone();
     for (CComponent &cc: allCCs) {
-        if (cc.area >= MIN_CC_AREA) {
+        if (cc.area >= minCCArea(image.cols, image.rows)) {
             drawCC(allComponents, cc);
             //yCentroids.push_back(meanShift::Point {i, {centroidY}});
             // include height and width in clustering decision
@@ -118,7 +159,7 @@ Table tableExtract(const Mat &image) {
 
 
     // TODO justify bandwidth parameter
-    auto ccClusters = meanShift::cluster(yCentroids, CENTROID_CLUSTER_BANDWIDTH);
+    auto ccClusters = meanShift::cluster(yCentroids, centroidClusterBandwidth(image.rows, image.cols));
     /*
     // show cluster modes
     for (Cluster& c : centroidClusters) {
@@ -177,17 +218,6 @@ Table tableExtract(const Mat &image) {
      */
 
 
-    tesseract::TessBaseAPI tesseractAPI;
-    if (tesseractInit(tesseractAPI) == -1) {
-        fprintf(stderr, "Could not initialise tesseract API");
-        return 1;
-    }
-
-    int bytes_per_line = static_cast<int>(preprocessed.step1() * preprocessed.elemSize());
-    tesseractAPI.SetImage(preprocessed.data, preprocessed.cols, preprocessed.rows, /*bytes_per_pixel=*/1
-                          , bytes_per_line);
-    tesseractAPI.SetSourceResolution(300);
-
 
     // make 'rows' of 'words'
     vector<vector<wordBB>> rows;
@@ -211,15 +241,7 @@ Table tableExtract(const Mat &image) {
             wordBB w = wordBB(findBoundingRect(group, allCCs, image.rows, image.cols));
             // simple filtering
             // remove unlikely sized 'words'
-            int area = w.getArea();
-            int height = w.height;
-            int width = w.width;
-            if (height <= MIN_COMBINED_RECT_HEIGHT || height > MAX_COMBINED_RECT_HEIGHT
-                || width <= MIN_COMBINED_RECT_WIDTH //|| width > MAX_COMBINED_RECT_WIDTH
-                || area <= MIN_COMBINED_RECT_AREA || area > MAX_COMBINED_RECT_AREA) {
-                continue;
-            } else {
-                // add to rows
+            if (isPlausibleWordBBSize(w, image.cols, image.rows)) {
                 rows.back().push_back(w);
             }
         }
@@ -436,22 +458,21 @@ Table tableExtract(const Mat &image) {
         }
     }
 
-    {
-        Mat rects2 = overlayWords(binarised, allWordBBs, true);
-        showImage(rects2);
+    // save intermediate processing result
+    if (wordBBImg != nullptr) {
+        *wordBBImg = overlayWords(binarised, allWordBBs, true);
     }
+
+
+    int bytes_per_line = static_cast<int>(preprocessed.step1() * preprocessed.elemSize());
+    tesseractAPI.SetImage(preprocessed.data, preprocessed.cols, preprocessed.rows, /*bytes_per_pixel=*/1
+            , bytes_per_line);
+    tesseractAPI.SetSourceResolution(300);
 
 
     for (wordBB &w : allWordBBs) {
-        const char *wordText = getText(tesseractAPI, w, /* printAndShow = */false);
-        w.text = std::string(wordText);
-        // remove newlines
-        w.text.erase(remove(w.text.begin(), w.text.end(), '\n'), w.text.end());
-        w.text.shrink_to_fit();
-        printf("Text found: '%s'\n", w.text.data());
-        delete[] wordText;
+        w.text = getCleanedText(tesseractAPI, w);
     }
-    tesseractAPI.End();
 
     // create table;
     Table t((unsigned)estimatedColumns);
@@ -472,7 +493,7 @@ Table tableExtract(const Mat &image) {
         unsigned int currentColumn = 0;
         std::string cellText;
         for (const wordBB &w : allWordBBs) {
-            if (w.row != currentRow || w.column != currentColumn) {
+            if (w.row != currentRow || w.column != currentColumn || firstWord) {
                 if (firstWord) {
                     firstWord = false;
                 } else {
@@ -491,104 +512,7 @@ Table tableExtract(const Mat &image) {
     }
 
     // TODO Contour / line detection
-    showImage(binarised);
+    //showImage(binarised);
     return t;
 }
 
-int tesseractInit(tesseract::TessBaseAPI& baseAPI) {
-    int tessStatus = baseAPI.Init("/usr/share/tessdata/", "eng", tesseract::OcrEngineMode::OEM_TESSERACT_ONLY);
-    //int tessStatus = tesseractAPI.Init("/usr/share/tessdata/", "eng", tesseract::OcrEngineMode::OEM_LSTM_ONLY);
-    if (tessStatus == -1) {
-        return tessStatus;
-    }
-    //tesseractAPI.ReadConfigFile();
-
-    // tesseractAPI.SetPageSegMode(tesseract::PageSegMode::PSM_SINGLE_BLOCK_VERT_TEXT);
-    baseAPI.SetPageSegMode(tesseract::PageSegMode::PSM_RAW_LINE);
-
-    // NOTE this doesn't work when using the LSTM functionality of tesseract
-    const char * whitelistChars = "1234567890%,-.<>abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
-    const char * blacklistChars = "{}|";
-    baseAPI.SetVariable("tessedit_char_whitelist", whitelistChars);
-    baseAPI.SetVariable("tessedit_char_blacklist", blacklistChars);
-    //cv::Ptr<cvTess> ocr = cvTess::create("/usr/share/", "eng", whitelistChars, cv::text::PSM_AUTO);
-    return 0;
-
-}
-
-// text must be delete[]d after use.
-// API must be initialised with image
-const char * getText(tesseract::TessBaseAPI& tesseractAPI, wordBB w, bool printAndShow) {
-    tesseractAPI.SetRectangle(w.x, w.y, w.width, w.height);
-
-    /*
-    // now combine each set of close CCs into an image
-    Mat binarisedCCroi(labels, expandedBB); // view of label matrix corresponding to current region of interest
-    Mat ccsInRect(expandedBB.height, expandedBB.width, CV_8UC1); // this will hold our connected component image
-    ccsInRect = 0; // without this, the image gets corrupted with crap
-    //printf("grouped CCs inside rect: x=%d, y=%d, w=%d, ht=%d\n", expandedBB.x, expandedBB.y, expandedBB.width, expandedBB.height);
-    for (Interval& iv : group) {
-        // TODO avoid indexing back into global list
-        Mat oneCC(binarisedCCroi.rows, binarisedCCroi.cols, CV_8UC1);
-        cv::compare(binarisedCCroi, iv.getLabel(), oneCC, cv::CMP_EQ);
-        //cv::bitwise_or(ccsInRect, oneCC, ccsInRect);
-        // alternatively, use oneCC as mask
-        cv::bitwise_or(ccsInRect, 255, ccsInRect, oneCC);
-    }
-    // clean it up a bit?
-    cv::morphologyEx(ccsInRect, ccsInRect, cv::MorphTypes::MORPH_ERODE, structuringElement(3, cv::MORPH_ELLIPSE));
-    cv::morphologyEx(ccsInRect, ccsInRect, cv::MorphTypes::MORPH_OPEN, structuringElement(2, 8, cv::MORPH_RECT));
-    */
-
-    // invert for tesseract
-    //ccsInRect = 255-ccsInRect;
-    // run Tesseract
-    //vector<cv::Rect>   boxes;
-    //vector<std::string> words;
-    //vector<float>  confidences;
-    //ocr->run(ccsInRect, outputText, &boxes, &words, &confidences, cv::text::OCR_LEVEL_WORD);
-    //tesseractAPI.Recognize(0);
-    const char * out = tesseractAPI.GetUTF8Text();
-    //const char * tsvText = tesseractAPI.GetTSVText(0);
-    //const char * hocrText = tesseractAPI.GetHOCRText(0);
-    //const char * unlvText = tesseractAPI.GetUNLVText();
-
-    if (!printAndShow) {
-        return out;
-    }
-
-    Pix * img = tesseractAPI.GetThresholdedImage();
-    // create mat from img data. step parameter is number of bytes per row, wpl is (integer) words per line
-
-    //PIX * converted = pixConvert1To32(nullptr, img, 0, 255);
-    //Mat tessPix(converted->h, converted->w, CV_8UC4, converted->data, sizeof(int)*converted->wpl);
-    Mat tessPix = matFromPix1(img);
-    pixDestroy(&img);
-    //cv::cvtColor(tessPix, tessPix, CV_BGRA2GRAY);
-    //cv::rectangle(tessPix, expandedBB, cv::Scalar(255, 255, 255), 4);
-
-    /*
-    std::string outputText(out);
-    outputText.erase(remove(outputText.begin(), outputText.end(), '\n'), outputText.end());
-    std::cout << "OCR output = \"" << outputText << "\" length = " << outputText.size() << std::endl;
-    */
-    printf("OCR text output: '%s'\n", out);
-    // output hocr
-    //char hocrFileName[30] {'\0'};
-    //snprintf(hocrFileName, 30, "hocr-rect-%d-%d-%d-%d.txt", expandedBB.x, expandedBB.y, expandedBB.width, expandedBB.height);
-    //std::ofstream hocrFile(hocrFileName);
-    //hocrFile << hocrText;
-    //hocrFile.close();
-    //printf("hOCR text written to %s\n", hocrFileName);
-    //printf("tsv text: '%s'\n", tsvText);
-    //printf("UNLV text: '%s'\n", unlvText);
-    //delete[] out;
-    //delete[] hocrText;
-    //delete[] unlvText;
-    //delete[] tsvText;
-
-    showImage(tessPix);
-    //showImage(ccsInRect);
-
-    return out;
-}

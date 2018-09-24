@@ -6,20 +6,12 @@
 
 #include <opencv2/core.hpp>
 #include <opencv2/imgproc.hpp>
-#ifndef REFERENCE_ANDROID
-#include <leptonica/allheaders.h>
-#else
-#include <allheaders.h>
-#endif
 
 #include <vector>
 #include "meanshift.h"
 #include "wordBB.h"
 #include "Interval.h"
-
 #include "ccomponent.h"
-#include "wordBB.h"
-#include "Interval.h"
 
 using Mat = cv::Mat;
 template <typename T>
@@ -49,12 +41,9 @@ Mat overlayWords(const Mat &image, const vector<vector<wordBB>> &words, bool col
 
 Mat overlayWords(const Mat &image, const vector<wordBB> &allWordBBs, bool colourByRowCol=false);
 
-cv::Mat matFromPix1(struct Pix * pix);
 
 Mat derivative(const Mat& src);
 
-int saveOrShowImage(const Mat&, const char *);
-
-// pseudo random RGB colours, for different numbers of parameters
+int saveImage(const Mat &, const char *);
 
 #endif //REFERENCE_UTILS_H
