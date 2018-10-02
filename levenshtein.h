@@ -47,7 +47,8 @@ auto levenshtein(std::string a, std::string b) -> size_t {
 
 template <typename T>
 auto min3(T a, T b, T c) -> T {
-    return std::min(std::min(a, b), c);
+    using std::min;
+    return min(min(a, b), c);
 }
 
 auto levenshtein(std::string a, std::string b) -> size_t {
@@ -55,12 +56,13 @@ auto levenshtein(std::string a, std::string b) -> size_t {
     // since they won't occur very often anyway, and the strings aren't too long
 
 	// make b the longer string
+
 	if (a.size() > b.size()) {
 	    std::swap(a, b);
 	}
 	
 	std::vector<size_t> buffer(b.length() + 1);
-	
+	// incremental assignment
 	std::iota(buffer.begin(), buffer.end(), 0);
 	for (size_t i = 1; i < a.length() + 1; ++i) {
 		auto temp = buffer[0]++;
@@ -72,8 +74,21 @@ auto levenshtein(std::string a, std::string b) -> size_t {
 			std::swap(buffer[j], temp);
 		}
 	}
-	
 	return buffer.back();
+}
+
+/*
+ * Levenshtein distance 'Score'
+ * Defined as follows: If |a| is the length of string a, and LD(a, b)
+ * is the levenshtein distance function, then the score is:
+ * S := 1 - LD(a, b)/max(|a|, |b|)
+ *
+ * Since LD(a, b) <= max(|a|, |b|), this is a rough way to create a
+ * 'correctness' fraction using the Levenshtein distance function
+ */
+double levenshteinScore(std::string a, std::string b) {
+    double maxLevDistance = static_cast<double>(std::max(a.size(), b.size()));
+    return 1.0 - levenshtein(a, b)/maxLevDistance;
 }
 
 #endif // LEVENSHTEIN_H

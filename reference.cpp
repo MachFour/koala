@@ -2,6 +2,15 @@
 // Created by max on 9/11/18.
 //
 
+#include "reference.h"
+#include "meanshift.h"
+#include "Interval.h"
+#include "ccomponent.h"
+#include "plotutils.h"
+#include "table.h"
+#include "utils.h"
+#include "ocrutils.h"
+#include "wordBB.h"
 
 //#include <opencv2/opencv.hpp>
 #include <opencv2/core.hpp>
@@ -22,16 +31,8 @@
 #include <cstdlib>
 #include <cmath>
 #include <algorithm>
+#include <numeric>
 
-#include "reference.h"
-#include "meanshift.h"
-#include "Interval.h"
-#include "ccomponent.h"
-#include "plotutils.h"
-#include "table.h"
-#include "utils.h"
-#include "ocrutils.h"
-#include "wordBB.h"
 
 int min(int a, int b) {
     return a <= b ? a : b;
@@ -400,7 +401,7 @@ Table tableExtract(const Mat &image, tesseract::TessBaseAPI& tesseractAPI, cv::M
             wordBB& w = allWordBBs[i];
             double centroidX = w.x + w.width / 2.0f;
             wordBBcentroidX.at<double>(i, 0) = centroidX;
-            printf("%f, ", centroidX);
+            printf("%.1f, ", centroidX);
         }
         printf("\n");
         //cv::TermCriteria termCriteria(cv::TermCriteria::EPS + cv::TermCriteria::COUNT, 1000, 0.001);
@@ -437,24 +438,29 @@ Table tableExtract(const Mat &image, tesseract::TessBaseAPI& tesseractAPI, cv::M
         for (int i = 0; i < estimatedColumns; ++i) {
             printf("Mixture %d: mean=%f\n", i, means.at<double>(i));
         }
-        /* Labels might not be in order of left-to-right columns, so we need to create this mapping */
-        vector<int> mixtureLabelToColumn;
-        for (int i = 0; i < estimatedColumns; ++i) {
-            mixtureLabelToColumn.push_back(i);
-        }
-        std::sort(mixtureLabelToColumn.begin(), mixtureLabelToColumn.end(), [&means](int a, int b) -> bool {
-            return means.at<double>(a) < means.at<double>(b);
-        });
 
         /*
         //Mat outputCentres;
         cv::kmeans(wordBBcentroidX, estimatedColumns, bestLabels, termCriteria, 3, cv::KMEANS_PP_CENTERS, outputCentres);
         */
         // apply column labels
-        for (auto i = 0; i < (int) allWordBBs.size(); ++i) {
-            unsigned int column = static_cast<unsigned int>(mixtureLabelToColumn[bestLabels.at<int>(i)]);
-            //printf("Label for wordBB %d: %d\n", i, bestLabels.at<int>(i));
-            allWordBBs[i].column = column;
+        {
+            /* Labels might not be in order of left-to-right columns, so we need to create this mapping */
+            vector<int> labelOrder(estimatedColumns, 0);
+            std::iota(labelOrder.begin(), labelOrder.end(), 0);
+            std::sort(labelOrder.begin(), labelOrder.end(), [&means](int a, int b) -> bool {
+                return means.at<double>(a) < means.at<double>(b);
+            });
+            const auto firstLabel = labelOrder.cbegin();
+            const auto lastLabel = labelOrder.cend();
+            for (auto i = 0; i < (int) allWordBBs.size(); ++i) {
+                auto currentLabel = bestLabels.at<int>(i);
+                // TODO could be more efficient than std::find every time but it probably doesn't matter
+                // find which column the label corresponds to
+                // std::find returns an iterator, so the corresponding index is found by 'subtracting' the begin() iterator
+                auto column = std::find(firstLabel, lastLabel, currentLabel) - firstLabel;
+                allWordBBs[i].column = static_cast<unsigned int>(column);
+            }
         }
     }
 
@@ -463,12 +469,9 @@ Table tableExtract(const Mat &image, tesseract::TessBaseAPI& tesseractAPI, cv::M
         *wordBBImg = overlayWords(binarised, allWordBBs, true);
     }
 
-
     int bytes_per_line = static_cast<int>(preprocessed.step1() * preprocessed.elemSize());
-    tesseractAPI.SetImage(preprocessed.data, preprocessed.cols, preprocessed.rows, /*bytes_per_pixel=*/1
-            , bytes_per_line);
+    tesseractAPI.SetImage(preprocessed.data, preprocessed.cols, preprocessed.rows, /*bytes_per_pixel=*/1, bytes_per_line);
     tesseractAPI.SetSourceResolution(300);
-
 
     for (wordBB &w : allWordBBs) {
         w.text = getCleanedText(tesseractAPI, w);

@@ -2,20 +2,21 @@
 // Created by max on 8/3/18.
 //
 
-#include <opencv2/core.hpp>
-#include <opencv2/highgui.hpp>
-#include <opencv2/imgcodecs.hpp>
-
-
-
-#include <vector>
-#include <algorithm>
-
 #include "reference.h"
 #include "ccomponent.h"
 #include "Interval.h"
 #include "randomColour.h"
 #include "utils.h"
+
+#include <opencv2/core.hpp>
+#include <opencv2/highgui.hpp>
+#include <opencv2/imgcodecs.hpp>
+
+#include <vector>
+#include <iostream>
+#include <algorithm>
+#include <fstream>
+
 
 
 void drawCC(Mat& img, const CComponent& cc, cv::Scalar colour) {
@@ -198,6 +199,30 @@ Mat derivative(const Mat& src) {
     return deriv;
 }
 
+// https://codereview.stackexchange.com/questions/22901/reading-all-bytes-from-a-file
+// https://en.cppreference.com/w/cpp/io/basic_istream/read
+std::string readFile(const std::string &filename) {
+    // initially seek to end of file to get its position
+    std::ifstream ifs(filename, std::ios::binary | std::ios::ate);
+    if (!ifs.is_open()) {
+        printf("Could not open file with name %s\n", filename.c_str());
+        return "";
+    }
+    // XXX this may not always be an accurate indicator of the file size!
+    auto size = ifs.tellg();
+#ifdef REFERENCE_ANDROID
+#warning "tellg() may not work as a size indication on Android"
+#endif
+
+    std::string fileString(size, '\0');
+    ifs.seekg(0);
+    ifs.read(&fileString[0], size);
+    ifs.close();
+
+    return fileString;
+}
+
+
 void showImage(const Mat& img) {
 #ifndef REFERENCE_ANDROID
     namedWindow("output", cv::WINDOW_NORMAL);
@@ -209,6 +234,7 @@ void showImage(const Mat& img) {
 
 int saveImage(const Mat &img, const char *outFile) {
     bool result = false;
+#ifndef REFERENCE_ANDROID
     try {
         result |= cv::imwrite(outFile, img);
         if (!result) {
@@ -217,7 +243,7 @@ int saveImage(const Mat &img, const char *outFile) {
     } catch (const cv::Exception& ex) {
         fprintf(stderr, "exception writing images: %s\n", ex.what());
     }
-
+#endif
     // result = true -> return 0 for no error
     return !result;
 }

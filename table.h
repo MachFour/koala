@@ -7,78 +7,40 @@
 
 #include <vector>
 #include <string>
+#include <iterator>
+#include <algorithm>
 
-#include <cstdio>
 #ifdef REFERENCE_ANDROID
 #include <android/log.h>
 #endif
 
+
 class Table {
+    using string = std::string;
+    using stringVector = std::vector<std::string>;
+
 public:
-    Table(size_t maxColumns) : maxColumns(maxColumns) {};
+    Table(size_t columns) : columns(columns) {};
 
-    // column separators become '\f' characters
-    std::string parseableString(const char * colSep = "\f") const {
-        // takes into account padding characters
-        std::string outStr;
-        for (const std::vector<std::string>& column : rows) {
-            for (const std::string& cell : column) {
-                outStr.append(cell);
-                outStr.append(colSep);
-            }
-            // replace last column separator with newline to mark end of row
-            outStr.back() = '\n';
-        }
-        return outStr;
-    }
+    std::string parseableString(const char * colSep = "\f") const;
 
-    std::string printableString(unsigned int minColumnWidth) const {
-        std::string outStr("\n\n");
-        // takes into account padding characters
-        int realMinColWidth = minColumnWidth - 2;
-        for (const std::vector<std::string>& column : rows) {
-            for (const std::string& cell : column) {
-                outStr.append(cell);
-                auto fillChars = rectifiedDifference(realMinColWidth, (int) cell.length());
-                outStr.append(fillChars, ' ');
-                outStr.append("| ");
-            }
-            outStr.append("\n");
-        }
-        return outStr;
-    }
-
-    size_t numRows() const {
-        return rows.size();
-    }
+    string printableString(unsigned int minColumnWidth) const;
+    size_t numRows() const;
 
     // returns empty string if indices are out of range
-    std::string getText(unsigned int row, unsigned int col) {
-        if (row >= numRows() || col >= maxColumns) {
-            return std::string("");
-        } else {
-            return rows[row][col];
-        }
-    }
+    string getText(size_t row, size_t col) const;
+    const stringVector& getRow(size_t row) const;
 
-    void addRow() {
-        std::vector<std::string> row(maxColumns);
-        rows.push_back(row);
-    }
-    void setColumnText(unsigned int row, unsigned int col, std::string text) {
-        while (row >= rows.size()) {
-            addRow();
-        }
-        rows[row][col] = text;
-    }
+
+    void addRow();
+    void setColumnText(size_t row, size_t col, std::string text);
+
+    static Table parseFromString(string tableString, string columnSep="\f");
+    static auto compareTable(const Table& actual, const Table& expected) -> std::pair<double, double>;
 
 private:
-    size_t maxColumns;
+    size_t columns;
     std::vector<std::vector<std::string>> rows;
-
-    static unsigned int rectifiedDifference(int a, int b) {
-        return a - b <= 0 ? 0 : (unsigned int)(a - b);
-    }
 };
 
 #endif //REFERENCE_TABLE_H

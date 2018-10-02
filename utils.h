@@ -4,14 +4,15 @@
 #ifndef REFERENCE_UTILS_H
 #define REFERENCE_UTILS_H
 
-#include <opencv2/core.hpp>
-#include <opencv2/imgproc.hpp>
-
-#include <vector>
 #include "meanshift.h"
 #include "wordBB.h"
 #include "Interval.h"
 #include "ccomponent.h"
+
+#include <opencv2/core.hpp>
+#include <opencv2/imgproc.hpp>
+
+#include <vector>
 
 using Mat = cv::Mat;
 template <typename T>
@@ -41,6 +42,7 @@ Mat overlayWords(const Mat &image, const vector<vector<wordBB>> &words, bool col
 
 Mat overlayWords(const Mat &image, const vector<wordBB> &allWordBBs, bool colourByRowCol=false);
 
+std::string readFile(const std::string &filename);
 
 Mat derivative(const Mat& src);
 
