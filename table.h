@@ -10,11 +10,6 @@
 #include <iterator>
 #include <algorithm>
 
-#ifdef REFERENCE_ANDROID
-#include <android/log.h>
-#endif
-
-
 class Table {
     using string = std::string;
     using stringVector = std::vector<std::string>;

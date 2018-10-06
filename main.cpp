@@ -1,11 +1,11 @@
 #include "reference.h"
 #include "utils.h"
 #include "ocrutils.h"
+#include "InputParser.h"
 
 #include <iostream>
 #include <cstdio>
 #include <string>
-#include <algorithm>
 #include <fstream>
 
 // android build uses different header files
@@ -18,6 +18,7 @@
 #include <opencv2/core.hpp>
 #include <opencv2/imgcodecs.hpp>
 
+using std::string;
 /*
 std::string exec(const char * cmd) {
     constexpr int bufferLength = 128;
@@ -41,14 +42,16 @@ std::string exec(const char * cmd) {
     pclose(pipe);
     return result;
 }
+*/
 
 std::string baseName(const char * fileName) {
     std::string basename(fileName);
     size_t lastSlash = basename.rfind('/');
-    basename.erase(0, lastSlash);
+    if (lastSlash != std::string::npos) {
+        basename.erase(0, lastSlash);
+    }
     return basename;
 }
-*/
 
 void testMain() {
     std::string filePath("est-images/output//home/max/uni/thesis/label-pics-cropped/img_2557.txt");
@@ -61,38 +64,59 @@ void testMain() {
 static const char configPath[] = "/home/max/thesis/koala/data/tesseract.config";
 static const char dataPath[] = "/usr/share/tessdata/";
 
-static void doTableComparison(const Table& test, const char * truthFile) {
-    std::string trueTableString = readFile(truthFile);
-    if (trueTableString == "") {
-        printf("Ground truth table string could not be read");
-        return;
+static std::pair<double, double> doTableComparison(const Table& test, const string& truthFile, const string& testOutPath) {
+    bool doOutput = !testOutPath.empty();
+    string trueTableString = readFile(truthFile);
+    if (trueTableString.empty()) {
+        fprintf(stderr, "Ground truth table string could not be read");
+        return {-1, -1};
     }
     Table trueTable = Table::parseFromString(trueTableString, "\\");
+    std::pair<double, double> comparisonScore = Table::compareTable(test, trueTable);
 
-    using namespace std;
-    pair<double, double> comparisonScore = Table::compareTable(test, trueTable);
-    cout << endl << endl;
-    cout << "**** Ground truth table comparison: ****" << endl;
-    cout << "Ground truth table:" << endl;
-    cout << trueTable.printableString(25) << endl;
-    cout << "Comparison scores:" << endl;
+    if (doOutput) {
+        std::ofstream testOutFile(testOutPath);
+        using std::endl;
+        if (testOutFile.is_open()) {
+            testOutFile << endl << endl;
+            testOutFile << "**** Ground truth table comparison: ****" << endl;
+            testOutFile << "Ground truth table:" << endl;
+            testOutFile << trueTable.printableString(25) << endl;
+            testOutFile << endl << endl;
+            testOutFile << "Actual table:" << endl;
+            testOutFile << test.printableString(25) << endl;
+            testOutFile << endl << endl;
+            testOutFile << "Comparison scores:" << endl;
+            testOutFile << "Average key column accuracy: " << 100*comparisonScore.first << "%" << endl;
+            testOutFile << "Weighted value col accuracy: " << 100*comparisonScore.second << "%" << endl;
+        } else {
+            fprintf(stderr, "Could not write to test output file");
+        }
+    }
 
-    printf("Avg Levenshtein distance score (key column): %.1f%%\n", 100*comparisonScore.first);
-    printf("Weighted avg Levenshtein score (value cols): %.1f%%\n", 100*comparisonScore.second);
+    return comparisonScore;
 }
 
 int main(int argc, char ** argv) {
+    // TODO add option to suppress image display
     if (argc != 3 && argc != 4) {
-        printf("Usage: %s <input.img> <output prefix> [<ground truth.txt>]\n", argv[0]);
+        printf("Usage: %s <input.img> [-o <output prefix>] [-t <ground truth.txt>]\n", argv[0]);
         return -1;
     }
 
-    const char * inFile = argv[1];
-    const char * outFile = argv[2];
-    const char * truthFile = argc == 4 ? argv[3] : nullptr;
+    InputParser ip(argc, argv);
+    if (ip.cmdOptionExists("-o")) {
 
-    std::string outCsv = outFile;
-    outCsv.append(".csv");
+    }
+
+    const char * inFile = argv[1];
+    std::string outPrefix = ip.getCmdOption("-o");
+    std::string truthFile = ip.getCmdOption("-t");
+
+    bool doTest = !truthFile.empty();
+    bool doOutput = !outPrefix.empty();
+    // if we have a ground truth file, assume it's batch mode
+    bool batchMode = doTest;
 
     cv::Mat image = imread(inFile, cv::IMREAD_GRAYSCALE);
     if (!image.data) {
@@ -107,21 +131,33 @@ int main(int argc, char ** argv) {
     }
 
     Mat clusteredWords;
-    Table outTable = tableExtract(image, tesseractAPI, &clusteredWords);
-    showImage(clusteredWords);
+    Table outTable = tableExtract(image, tesseractAPI, &clusteredWords, batchMode);
+    if (!batchMode) {
+        showImage(clusteredWords);
+    }
 
     tesseractAPI.End();
 
-    std::cout << outTable.printableString(30);
 
-    std::ofstream tableOutput(outCsv, std::ios::binary);
-    std::string outString = outTable.parseableString(",");
-    // make sure characters are ascii!!
-    // ::tolower uses the 'tolower' function in the outermost namespace
-    // std::transform(outString.begin(), outString.end(), outString.begin(), ::tolower);
-    tableOutput << outString;
+    if (doOutput) {
+        std::string tableOutputPath = std::string(outPrefix).append(".table");
+        std::ofstream tableOutput(tableOutputPath, std::ios::binary);
+        // make sure characters are ascii!!
+        // ::tolower uses 'tolower' function from outermost namespace
+        // std::transform(outString.begin(), outString.end(), outString.begin(), ::tolower);
+        if (tableOutput.is_open()) {
+            tableOutput << outTable.parseableString(",");
+            tableOutput.close();
+        } else {
+            fprintf(stderr, "could not open output file for csv writing: %s\n", tableOutputPath.c_str());
+        }
+    }
 
-    if (truthFile != nullptr) {
-        doTableComparison(outTable, truthFile);
+    if (doTest) {
+        std::string testOutputPath = doOutput ? outPrefix.append(".test") : "";
+        auto scores = doTableComparison(outTable, truthFile, testOutputPath);
+        printf("%s %.3f %.3f\n", baseName(inFile).c_str(), scores.first, scores.second);
+    } else {
+        std::cout << outTable.printableString(30);
     }
 }

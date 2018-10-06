@@ -79,7 +79,7 @@ bool isPlausibleWordBBSize(const wordBB& w, int imgW, int imgH) {
 }
 
 
-Table tableExtract(const Mat &image, tesseract::TessBaseAPI& tesseractAPI, cv::Mat * wordBBImg) {
+Table tableExtract(const Mat &image, tesseract::TessBaseAPI& tesseractAPI, cv::Mat * wordBBImg, bool batchMode) {
     Mat grey;
     Mat preprocessed;
 #ifdef REFERENCE_ANDROID
@@ -141,9 +141,11 @@ Table tableExtract(const Mat &image, tesseract::TessBaseAPI& tesseractAPI, cv::M
         allCCs.push_back(cc);
     }
 
-    //showImage(image);
-    //showImage(open);
-    //showImage(binarised);
+    if (!batchMode) {
+        showImage(image);
+        showImage(open);
+        showImage(binarised);
+    }
 
     vector<meanShift::Point<CComponent>> yCentroids;
     Mat allComponents = binarised.clone();
@@ -152,12 +154,13 @@ Table tableExtract(const Mat &image, tesseract::TessBaseAPI& tesseractAPI, cv::M
             drawCC(allComponents, cc);
             //yCentroids.push_back(meanShift::Point {i, {centroidY}});
             // include height and width in clustering decision
-            double ccHeight = static_cast<double>(cc.height);
+            auto ccHeight = static_cast<double>(cc.height);
             yCentroids.push_back(meanShift::Point<CComponent>{cc, {cc.centroidY, ccHeight}});
         }
     }
-    //showImage(allComponents);
-
+    if (!batchMode) {
+        //showImage(allComponents);
+    }
 
     // TODO justify bandwidth parameter
     auto ccClusters = meanShift::cluster(yCentroids, centroidClusterBandwidth(image.rows, image.cols));
@@ -226,8 +229,8 @@ Table tableExtract(const Mat &image, tesseract::TessBaseAPI& tesseractAPI, cv::M
         vector<vector<Interval>> closeCCsInCluster;
         vector<Interval> intervals;
         for (CComponent cc : c.getData()) {
-            double left = static_cast<double>(cc.left);
-            double width = static_cast<double>(cc.width);
+            auto left = static_cast<double>(cc.left);
+            auto width = static_cast<double>(cc.width);
             intervals.push_back(Interval(cc.label, left, left + width));
         }
         Interval::groupCloseIntervals(intervals, closeCCsInCluster, 1.5);
@@ -249,7 +252,9 @@ Table tableExtract(const Mat &image, tesseract::TessBaseAPI& tesseractAPI, cv::M
     }
 
     Mat rects = overlayWords(binarised, rows, false);
-    showImage(rects);
+    if (!batchMode) {
+        showImage(rects);
+    }
 
     /*
      * find column separators as the vertical lines intersecting the least number of rectangles
@@ -268,17 +273,17 @@ Table tableExtract(const Mat &image, tesseract::TessBaseAPI& tesseractAPI, cv::M
         Mat rectsPerRow;
         Mat sortedRectsPerRow;
         for (auto &row : rows) {
-            unsigned char s = static_cast<unsigned char>(row.size());
+            auto s = static_cast<unsigned char>(row.size());
             if (s != 0) {
                 rectsPerRow.push_back(s);
             }
         }
         cv::sort(rectsPerRow, sortedRectsPerRow, CV_SORT_EVERY_COLUMN | CV_SORT_ASCENDING);
         //cv::integral(sortedRectsPerRow, sumRectsPerRow, sumSqRectsPerRow, CV_32S, CV_64F);
-        int n = static_cast<int>(rectsPerRow.size[0]);
-        rectsPerRowQ1 = sortedRectsPerRow.at<unsigned char>(n / 4);
-        //rectsPerRowQ2 = sortedRectsPerRow.at<unsigned char>(n / 2);
-        //rectsPerRowQ3 = sortedRectsPerRow.at<unsigned char>(n * 3 / 4);
+        auto n = rectsPerRow.size[0];
+        rectsPerRowQ1 = sortedRectsPerRow.at<unsigned char>((int)n / 4);
+        //rectsPerRowQ2 = sortedRectsPerRow.at<unsigned char>((int)n / 2);
+        //rectsPerRowQ3 = sortedRectsPerRow.at<unsigned char>((int)n * 3 / 4);
         //rectsPerRowIQR = rectsPerRowQ3 - rectsPerRowQ1;
     }
 
@@ -287,23 +292,23 @@ Table tableExtract(const Mat &image, tesseract::TessBaseAPI& tesseractAPI, cv::M
     {
         unsigned int rowNum = 0;
         for (auto &row : rows) {
-            if (row.size() == 0) {
-                continue;
-            }
             for (wordBB &w : row) {
                 w.row = rowNum;
-
-                allWordBBs.push_back(w);
                 if (row.size() >= rectsPerRowQ1) {
                     // otherwise too few rows for accurate column number estimation is likely to be faulty
                     wordBBsforColumnInference.push_back(w);
                 }
+                allWordBBs.push_back(w);
             }
-            rowNum++;
+            if (!row.empty()) {
+                // don't increment rowNum if the row was empty
+                rowNum++;
+            }
         }
-        // TODO colour by row
-        Mat rowRects = overlayWords(binarised, allWordBBs, false);
-        showImage(rowRects);
+        if (!batchMode) {
+            Mat rowRects = overlayWords(binarised, allWordBBs, false);
+            showImage(rowRects);
+        }
     }
 
 
@@ -336,23 +341,25 @@ Table tableExtract(const Mat &image, tesseract::TessBaseAPI& tesseractAPI, cv::M
         //cv::normalize(smoothedRectCutDensity)
 
 #ifndef REFERENCE_ANDROID
-        cv::Ptr<Plot> plotCounts = makePlot(rectsCutByXCount64F, &image);
-        cv::Ptr<Plot> plotSmoothedCounts = makePlot(smoothedRectCutDensity, &image);
-        Mat plotResultCounts;
-        {
-            plotCounts->render(plotResultCounts);
-        }
-        Mat plotResultSmoothedCounts;
-        {
-            plotSmoothedCounts->render(plotResultSmoothedCounts);
-        }
+        if (!batchMode) {
+            cv::Ptr<Plot> plotCounts = makePlot(rectsCutByXCount64F, &image);
+            cv::Ptr<Plot> plotSmoothedCounts = makePlot(smoothedRectCutDensity, &image);
+            Mat plotResultCounts;
+            {
+                plotCounts->render(plotResultCounts);
+            }
+            Mat plotResultSmoothedCounts;
+            {
+                plotSmoothedCounts->render(plotResultSmoothedCounts);
+            }
 
-        showImage(0.5 * plotResultCounts + 0.5 * rects);
-        showImage(0.5 * plotResultSmoothedCounts + 0.5 * rects);
+            showImage(0.5 * plotResultCounts + 0.5 * rects);
+            showImage(0.5 * plotResultSmoothedCounts + 0.5 * rects);
+        }
 #endif // REFERENCE_ANDROID
     }
 
-    int estimatedColumns;
+    unsigned int estimatedColumns;
 
     // count number of peaks by sign counting, where the sign is taken relative to a threshold (3rd quartile?)
     {
@@ -362,7 +369,7 @@ Table tableExtract(const Mat &image, tesseract::TessBaseAPI& tesseractAPI, cv::M
         int q3 = m0.at<int>(n * 3 / 4);
         Mat m1 = smoothedRectCutDensity32S - q3;
         // count peaks by sign changes in m1
-        int peaks = 0;
+        unsigned int peaks = 0;
         bool inPeak = false;
         for (int i = 1; i < m1.rows; ++i) {
             bool atThreshold = (m1.at<int>(i) >= 0);
@@ -373,37 +380,45 @@ Table tableExtract(const Mat &image, tesseract::TessBaseAPI& tesseractAPI, cv::M
             inPeak = atThreshold;
         }
         estimatedColumns = peaks;
-        printf("Estimated columns by sign counting: %d\n", estimatedColumns);
-#ifndef REFERENCE_ANDROID
-        cv::Ptr<Plot> plotThreshold = makePlot(smoothedRectCutDensity, &image);
-        Mat plotResultThresh;
-        {
-            plotThreshold->render(plotResultThresh);
-            // draw q3 as a line on the image
-            // need to calculate its y coordinate, given that the plot's original height was equal to
-            // max(smoothedCutRectDensity), but was rescaled to have height equal to the original image
-            double maxVal;
-            cv::minMaxIdx(smoothedRectCutDensity, NULL, &maxVal);
-            // subtract from 1.0 to get threshold referred to bottom of image, not top
-            int thresholdYCoord = static_cast<int>((1.0 - q3 / maxVal) * plotResultThresh.rows);
-            cv::rectangle(plotResultThresh, cv::Rect(0, thresholdYCoord, plotResultThresh.cols - 1, 1), 255, 5);
+        if (!batchMode) {
+            printf("Estimated columns by sign counting: %u\n", estimatedColumns);
         }
-        showImage(0.5 * plotResultThresh + 0.5 * rects);
+#ifndef REFERENCE_ANDROID
+        if (!batchMode) {
+            cv::Ptr<Plot> plotThreshold = makePlot(smoothedRectCutDensity, &image);
+            Mat plotResultThresh;
+            {
+                plotThreshold->render(plotResultThresh);
+                // draw q3 as a line on the image
+                // need to calculate its y coordinate, given that the plot's original height was equal to
+                // max(smoothedCutRectDensity), but was rescaled to have height equal to the original image
+                double maxVal;
+                cv::minMaxIdx(smoothedRectCutDensity, nullptr, &maxVal);
+                // subtract from 1.0 to get threshold referred to bottom of image, not top
+                int thresholdYCoord = static_cast<int>((1.0 - q3 / maxVal) * plotResultThresh.rows);
+                cv::rectangle(plotResultThresh, cv::Rect(0, thresholdYCoord, plotResultThresh.cols - 1, 1), 255, 5);
+            }
+            showImage(0.5 * plotResultThresh + 0.5 * rects);
+        }
 #endif // REFERENCE_ANDROID
     }
 
     {
         // now put horizontal centres of all wordBBs into a Mat and run kmeans
         Mat wordBBcentroidX((int) allWordBBs.size(), 1, CV_64FC1);
-        printf("Mixture model with %d components and centroid X values:\n", estimatedColumns);
-
         for (unsigned int i = 0; i < allWordBBs.size(); ++i) {
-            wordBB& w = allWordBBs[i];
+            const wordBB& w = allWordBBs[i];
             double centroidX = w.x + w.width / 2.0f;
             wordBBcentroidX.at<double>(i, 0) = centroidX;
-            printf("%.1f, ", centroidX);
         }
-        printf("\n");
+
+        if (!batchMode) {
+            printf("Mixture model with %d components and centroid X values:\n", estimatedColumns);
+            for (unsigned int i = 0; i < allWordBBs.size(); ++i) {
+                printf("%.1f, ", wordBBcentroidX.at<double>(i, 0));
+            }
+        }
+
         //cv::TermCriteria termCriteria(cv::TermCriteria::EPS + cv::TermCriteria::COUNT, 1000, 0.001);
 
         /* Use EM Algorithm as slight generalisation of k-means, to allow different cluster sizes / column widths
@@ -417,12 +432,15 @@ Table tableExtract(const Mat &image, tesseract::TessBaseAPI& tesseractAPI, cv::M
         // is equivalent to COV_MAT_SPHERICAL (all dims have same sigma)
         emAlg->setCovarianceMatrixType(cv::ml::EM::Types::COV_MAT_SPHERICAL);
         Mat initialMeans(estimatedColumns, 1, CV_64FC1);
-        for (auto i = 0; i < estimatedColumns; ++i) {
+        for (unsigned i = 0; i < estimatedColumns; ++i) {
             // want the centre (hence +0.5) of the ith column,
             // when image is divided into estimatedColumns parts of equal width
-            double mixtureMean = (i + 0.5) / estimatedColumns * image.cols;
-            printf("Mixture %d initial mean: %f\n", i, mixtureMean);
-            initialMeans.at<double>(i, 0) = mixtureMean;
+            initialMeans.at<double>(i, 0) = (i + 0.5) / estimatedColumns * image.cols;
+        }
+        if (!batchMode) {
+            for (unsigned i = 0; i < estimatedColumns; ++i) {
+                printf("Mixture %d initial mean: %f\n", i, initialMeans.at<double>(i, 0));
+            }
         }
         // cluster samples around initial means
         // don't provide initial covariance matrix estimates, or weights
@@ -435,8 +453,10 @@ Table tableExtract(const Mat &image, tesseract::TessBaseAPI& tesseractAPI, cv::M
         emAlg->trainE(wordBBcentroidX, initialMeans, cv::noArray(), cv::noArray(), cv::noArray(), bestLabels);
 
         Mat means = emAlg->getMeans();
-        for (int i = 0; i < estimatedColumns; ++i) {
-            printf("Mixture %d: mean=%f\n", i, means.at<double>(i));
+        if (!batchMode) {
+            for (unsigned i = 0; i < estimatedColumns; ++i) {
+                printf("Mixture %d: mean=%f\n", i, means.at<double>(i));
+            }
         }
 
         /*
@@ -469,7 +489,7 @@ Table tableExtract(const Mat &image, tesseract::TessBaseAPI& tesseractAPI, cv::M
         *wordBBImg = overlayWords(binarised, allWordBBs, true);
     }
 
-    int bytes_per_line = static_cast<int>(preprocessed.step1() * preprocessed.elemSize());
+    auto bytes_per_line = static_cast<int>(preprocessed.step1() * preprocessed.elemSize());
     tesseractAPI.SetImage(preprocessed.data, preprocessed.cols, preprocessed.rows, /*bytes_per_pixel=*/1, bytes_per_line);
     tesseractAPI.SetSourceResolution(300);
 
@@ -478,7 +498,7 @@ Table tableExtract(const Mat &image, tesseract::TessBaseAPI& tesseractAPI, cv::M
     }
 
     // create table;
-    Table t((unsigned)estimatedColumns);
+    Table t(estimatedColumns);
     {
         // sort by row, then by column, then by x coordinate
         std::sort(allWordBBs.begin(), allWordBBs.end(), [](const wordBB &a, const wordBB &b) -> bool {

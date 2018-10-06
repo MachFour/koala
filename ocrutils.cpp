@@ -42,8 +42,8 @@ int tesseractInit(tesseract::TessBaseAPI& baseAPI, const char * path, const char
     baseAPI.SetPageSegMode(tesseract::PageSegMode::PSM_RAW_LINE);
 
     // NOTE this doesn't work when using the LSTM functionality of tesseract
-    const char * whitelistChars = "1234567890%,-.<>abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
-    const char * blacklistChars = "{}|";
+    const char * whitelistChars = "1234567890%(),-.<>abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    const char * blacklistChars = "{}|$#@!";
     baseAPI.SetVariable("tessedit_char_whitelist", whitelistChars);
     baseAPI.SetVariable("tessedit_char_blacklist", blacklistChars);
     //cv::Ptr<cvTess> ocr = cvTess::create("/usr/share/", "eng", whitelistChars, cv::text::PSM_AUTO);
@@ -53,7 +53,7 @@ int tesseractInit(tesseract::TessBaseAPI& baseAPI, const char * path, const char
 
 
 // API must be initialised with image
-std::string getCleanedText(tesseract::TessBaseAPI &tesseractAPI, wordBB w) {
+std::string getCleanedText(tesseract::TessBaseAPI &tesseractAPI, const wordBB& w) {
     /*
     // now combine each set of close CCs into an image
     Mat binarisedCCroi(labels, expandedBB); // view of label matrix corresponding to current region of interest
@@ -89,7 +89,7 @@ std::string getCleanedText(tesseract::TessBaseAPI &tesseractAPI, wordBB w) {
     return despaced;
 }
 
-std::string getCleanedText(tesseract::TessBaseAPI &tesseractAPI, wordBB w, cv::Mat& tessImage) {
+std::string getCleanedText(tesseract::TessBaseAPI &tesseractAPI, const wordBB& w, cv::Mat& tessImage) {
     std::string ocrText = getCleanedText(tesseractAPI, w);
 
     Pix * img = tesseractAPI.GetThresholdedImage();

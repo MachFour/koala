@@ -5,9 +5,9 @@
 #ifndef REFERENCE_WORDBB_H
 #define REFERENCE_WORDBB_H
 
+#include "randomColour.h"
 #include <string>
 #include <opencv2/core.hpp>
-#include "randomColour.h"
 
 /*
  * Holds data related to expanded bounding boxes, used to track candidate words

@@ -5,6 +5,8 @@
 #ifndef REFERENCE_OCRUTILS_H
 #define REFERENCE_OCRUTILS_H
 
+#include "wordBB.h"
+
 #include <opencv2/core.hpp>
 
 #ifdef REFERENCE_ANDROID
@@ -15,11 +17,10 @@
 #include <leptonica/allheaders.h>
 #endif
 
-#include "wordBB.h"
 
 int tesseractInit(tesseract::TessBaseAPI& baseAPI, const char * path, const char * dataPath);
-std::string getCleanedText(tesseract::TessBaseAPI&, wordBB w);
-std::string getCleanedText(tesseract::TessBaseAPI&, wordBB w, cv::Mat& tessImage);
+std::string getCleanedText(tesseract::TessBaseAPI&, const wordBB& w);
+std::string getCleanedText(tesseract::TessBaseAPI&, const wordBB& w, cv::Mat& tessImage);
 cv::Mat matFromPix1(struct Pix * pix);
 
 #endif //REFERENCE_OCRUTILS_H
