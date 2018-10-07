@@ -34,27 +34,17 @@
 #include <numeric>
 #include <stdexcept>
 
-/*
- * Helper functions
- */
-int min(int a, int b) {
-    return a <= b ? a : b;
-}
-int max(int a, int b) {
-    return a >= b ? a : b;
-}
-
 // global parameters in terms of the size of the input image
 
 // const int CENTROID_CLUSTER_BANDWIDTH = 20;
 static int centroidClusterBandwidth(int w, int h) {
-    return min(w, h)/75;
+    return std::min(w, h)/75;
 }
 
 
 //const int MIN_CC_AREA = 80;
 static int minCCArea(int w, int h) {
-    return max(10, w*h/37500);
+    return std::max(10, w*h/37500);
 }
 
 /*
@@ -75,10 +65,11 @@ static bool isPlausibleWordBBSize(const wordBB& w, int imgW, int imgH) {
     int minHeight = imgH/150;
     int maxHeight = imgH/4;
     int minWidth = imgW/200;
-    //int maxWidth = imgW/4;
+    int maxWidth = imgW/2;
+    // TODO aspect ratio
 
     return wordW >= minWidth && wordH >= minHeight && wordArea >= minArea
-    /*&& wordW <= maxWidth */&& wordH <= maxHeight && wordArea <= maxArea;
+        && wordW <= maxWidth && wordH <= maxHeight && wordArea <= maxArea;
 }
 
 /*
@@ -87,7 +78,8 @@ static bool isPlausibleWordBBSize(const wordBB& w, int imgW, int imgH) {
 static Mat preprocess(const Mat& image, bool batchMode);
 static vector<vector<wordBB>> findWords(const Mat &binarised, bool batchMode);
 static void classifyColumns(std::vector<wordBB>& words, int numColumns, int imageWidth, bool batchMode=true);
-
+static void doOcr(const Mat& imageForOcr, tesseract::TessBaseAPI& tesseractAPI, vector<wordBB> & allWordBBs);
+static Table createTable(const vector<wordBB>& allWordBBs, int estimatedColumns);
 
 
 Table tableExtract(const Mat &image, tesseract::TessBaseAPI& tesseractAPI, cv::Mat * wordBBImg, bool batchMode) {
@@ -167,19 +159,12 @@ Table tableExtract(const Mat &image, tesseract::TessBaseAPI& tesseractAPI, cv::M
     }
 
     Mat smoothedRectCutDensity;
-    Mat smoothedRectCutDensity32S;
     {
-        int blurSize = image.cols / 8;
+        int blurSize = image.cols / 16;
         if (blurSize % 2 == 0) {
             blurSize++;
         }
-        {
-            Mat tmp;
-            cv::GaussianBlur(rectsCutByXCount64F, tmp, cv::Size(blurSize, blurSize), 0, 0);
-            //cv::medianBlur(rectsCutByXCount, tmp, blurSize);
-            tmp.convertTo(smoothedRectCutDensity32S, CV_32SC1);
-            tmp.convertTo(smoothedRectCutDensity, CV_64FC1);
-        }
+        cv::GaussianBlur(rectsCutByXCount64F, smoothedRectCutDensity, cv::Size(blurSize, blurSize), 0, 0);
         //cv::normalize(smoothedRectCutDensity)
 
 #ifndef REFERENCE_ANDROID
@@ -204,22 +189,30 @@ Table tableExtract(const Mat &image, tesseract::TessBaseAPI& tesseractAPI, cv::M
     unsigned int estimatedColumns;
 
     // count number of peaks by sign counting, where the sign is taken relative to a threshold (3rd quartile?)
+    // TODO findpeaks needs improvement
     {
         Mat m0;
-        cv::sort(smoothedRectCutDensity32S, m0, cv::SORT_ASCENDING | cv::SORT_EVERY_COLUMN);
-        int n = smoothedRectCutDensity32S.rows;
-        int q3 = m0.at<int>(n * 3 / 4);
-        Mat m1 = smoothedRectCutDensity32S - q3;
-        // count peaks by sign changes in m1
+        cv::sort(smoothedRectCutDensity, m0, cv::SORT_ASCENDING | cv::SORT_EVERY_COLUMN);
+        int n = smoothedRectCutDensity.rows;
+        // 75th percentile
+        auto q75 = m0.at<double>(n * 3 / 4);
+        // 60th percentile
+        auto q60 = m0.at<double>(n * 3 / 5);
+        // count peaks by seeing when the smoothedRectCutDensity crosses the threshold
         unsigned int peaks = 0;
         bool inPeak = false;
-        for (int i = 1; i < m1.rows; ++i) {
-            bool atThreshold = (m1.at<int>(i) >= 0);
-            if (atThreshold && !inPeak) {
-                // just 'found' a new peak
-                peaks++;
+        for (int i = 1; i < n; ++i) {
+            auto x = smoothedRectCutDensity.at<double>(i);
+            if (x >= q75) {
+                // it's a peak
+                if (!inPeak) {
+                    peaks++;
+                }
+                inPeak = true;
+            } else if (x <= q60) {
+                // it's not a peak
+                inPeak = false;
             }
-            inPeak = atThreshold;
         }
         estimatedColumns = peaks;
         if (!batchMode) {
@@ -237,8 +230,10 @@ Table tableExtract(const Mat &image, tesseract::TessBaseAPI& tesseractAPI, cv::M
                 double maxVal;
                 cv::minMaxIdx(smoothedRectCutDensity, nullptr, &maxVal);
                 // subtract from 1.0 to get threshold referred to bottom of image, not top
-                int thresholdYCoord = static_cast<int>((1.0 - q3 / maxVal) * plotResultThresh.rows);
-                cv::rectangle(plotResultThresh, cv::Rect(0, thresholdYCoord, plotResultThresh.cols - 1, 1), 255, 5);
+                auto q75YCoord = static_cast<int>((1.0 - q75 / maxVal) * plotResultThresh.rows);
+                auto q60YCoord = static_cast<int>((1.0 - q60 / maxVal) * plotResultThresh.rows);
+                cv::rectangle(plotResultThresh, cv::Rect(0, q75YCoord, plotResultThresh.cols - 1, 1), 255, 5);
+                cv::rectangle(plotResultThresh, cv::Rect(0, q60YCoord, plotResultThresh.cols - 1, 1), 255, 5);
             }
             showImage(0.5 * plotResultThresh + 0.5 * rects);
         }
@@ -249,17 +244,10 @@ Table tableExtract(const Mat &image, tesseract::TessBaseAPI& tesseractAPI, cv::M
 
     // sort the wordBBs by row, then by column, then by x coordinate
     std::sort(allWordBBs.begin(), allWordBBs.end(), [](const wordBB &a, const wordBB &b) -> bool {
-        // want to check whether a < b
+        // sort predicate returns true if a < b
         std::array<int, 3> aCoords {a.row(), a.col(), a.x};
         std::array<int, 3> bCoords {b.row(), b.col(), b.x};
         return std::lexicographical_compare(aCoords.begin(), aCoords.end(), bCoords.begin(), bCoords.end());
-        /*if (a.row() != b.row()) {
-            return a.row() < b.row();
-        } else if (a.col() != b.col()) {
-            return a.col() < b.col();
-        } else {
-            return a.x < b.x;
-        }*/
     });
 
     // save intermediate processing result
@@ -267,40 +255,9 @@ Table tableExtract(const Mat &image, tesseract::TessBaseAPI& tesseractAPI, cv::M
         *wordBBImg = overlayWords(binarised, allWordBBs, true);
     }
 
-    Mat& imageForOcr = binarised; // use preprocessed to get Tesseract to do its own thresholding
-    auto bytes_per_line = static_cast<int>(imageForOcr.step1() * imageForOcr.elemSize());
-    tesseractAPI.SetImage(imageForOcr.data, imageForOcr.cols, imageForOcr.rows, /*bytes_per_pixel=*/1, bytes_per_line);
-    tesseractAPI.SetSourceResolution(300);
+    doOcr(binarised, tesseractAPI, allWordBBs);
 
-    for (wordBB &w : allWordBBs) {
-        w.text = getCleanedText(tesseractAPI, w);
-    }
-
-    // create table;
-    Table t(estimatedColumns);
-    {
-        bool firstWord = true;
-        int currentRow = 0;
-        int currentColumn = 0;
-        std::string cellText;
-        for (const wordBB &w : allWordBBs) {
-            if (w.row() != currentRow || w.col() != currentColumn || firstWord) {
-                if (firstWord) {
-                    firstWord = false;
-                } else {
-                    // set old cell
-                    t.setColumnText(currentRow, currentColumn, cellText);
-                }
-                // start new cell;
-                cellText = std::string(w.text);
-                currentRow = w.row();
-                currentColumn = w.col();
-            } else {
-                cellText.append(" ");
-                cellText.append(w.text);
-            }
-        }
-    }
+    Table t = createTable(allWordBBs, estimatedColumns);
 
     // TODO Contour / line detection
     //showImage(binarised);
@@ -437,7 +394,7 @@ static Mat preprocess(const Mat& image, bool batchMode) {
     Mat textEnhanced;
     // another strategy from https://stackoverflow.com/questions/10196198/how-to-remove-convexity-defects-in-a-sudoku-square
     // to have uniform brightness, divide image by result of closure than subtract the result, divide it
-    int blackhatKSize = MIN(image.rows, image.cols)/15;
+    int blackhatKSize = std::max(image.rows, image.cols)/50;
     cv::Mat sElement = structuringElement(blackhatKSize, cv::MORPH_ELLIPSE);
     morphologyEx(linesRemoved, textEnhanced, cv::MorphTypes::MORPH_TOPHAT, sElement);
     cv::normalize(textEnhanced, textEnhanced, 0, 255, cv::NORM_MINMAX);
@@ -570,8 +527,6 @@ vector<vector<wordBB>> findWords(const Mat &binarised, bool batchMode) {
      *      // return a list of each set of labels whose expanded bounding boxes/intervals overlap
      */
 
-
-
     // make 'rows' of 'words'
     vector<vector<wordBB>> rows;
     for (ccCluster &c: clustersByCentroid) {
@@ -602,3 +557,42 @@ vector<vector<wordBB>> findWords(const Mat &binarised, bool batchMode) {
     }
     return rows;
 }
+
+static void doOcr(const Mat& imageForOcr, tesseract::TessBaseAPI& tesseractAPI, vector<wordBB> & allWordBBs) {
+    auto bytes_per_line = static_cast<int>(imageForOcr.step1() * imageForOcr.elemSize());
+    tesseractAPI.SetImage(imageForOcr.data, imageForOcr.cols, imageForOcr.rows, /*bytes_per_pixel=*/1, bytes_per_line);
+    tesseractAPI.SetSourceResolution(300);
+
+    for (wordBB &w : allWordBBs) {
+        w.text = getCleanedText(tesseractAPI, w);
+    }
+}
+
+
+static Table createTable(const vector<wordBB>& allWordBBs, int estimatedColumns) {
+    // create table;
+    Table t(estimatedColumns);
+    bool firstWord = true;
+    int currentRow = 0;
+    int currentColumn = 0;
+    std::string cellText;
+    for (const wordBB &w : allWordBBs) {
+        if (w.row() != currentRow || w.col() != currentColumn || firstWord) {
+            if (firstWord) {
+                firstWord = false;
+            } else {
+                // set old cell
+                t.setColumnText(currentRow, currentColumn, cellText);
+            }
+            // start new cell;
+            cellText = std::string(w.text);
+            currentRow = w.row();
+            currentColumn = w.col();
+        } else {
+            cellText.append(" ");
+            cellText.append(w.text);
+        }
+    }
+    return t;
+}
+
