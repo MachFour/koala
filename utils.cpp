@@ -222,6 +222,24 @@ std::string readFile(const std::string &filename) {
     return fileString;
 }
 
+std::string basename(std::string filename, bool removeExtension) {
+    // check for and remove trailing slash(es)
+    while (filename.back() == '/') {
+        filename.pop_back();
+    }
+    size_t lastSlash = filename.rfind('/');
+    if (lastSlash != std::string::npos) {
+        // guaranteed that slash was not the last character, so there's at least one more character after lastSlash
+        filename.erase(0, lastSlash+1);
+    }
+    size_t lastDot = filename.rfind('.');
+    if (removeExtension && lastDot != std::string::npos) {
+        filename.erase(lastDot, filename.size() - lastDot);
+    }
+    filename.shrink_to_fit();
+    return filename;
+}
+
 
 void showImage(const Mat& img) {
 #ifndef REFERENCE_ANDROID

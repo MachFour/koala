@@ -6,6 +6,7 @@
 #define REFERENCE_H
 
 #include "table.h"
+#include "wordBB.h"
 
 #include <opencv2/core.hpp>
 

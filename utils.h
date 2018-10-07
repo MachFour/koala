@@ -43,6 +43,7 @@ Mat overlayWords(const Mat &image, const vector<vector<wordBB>> &words, bool col
 Mat overlayWords(const Mat &image, const vector<wordBB> &allWordBBs, bool colourByRowCol=false);
 
 std::string readFile(const std::string &filename);
+std::string basename(std::string filename, bool removeExtension=false);
 
 Mat derivative(const Mat& src);
 

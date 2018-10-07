@@ -18,7 +18,7 @@ find_package(OpenCV REQUIRED core highgui imgproc imgcodecs ximgproc plot ml)
 add_executable(reference
         main.cpp meanshift.cpp Interval.cpp utils.cpp randomColour.cpp plotutils.cpp reference.cpp ocrutils.cpp InputParser.cpp table.cpp
         meanshift.h reference.h Interval.h wordBB.h randomColour.h plotutils.h table.h utils.h ocrutils.h levenshtein.h InputParser.h
-)
+        tableComparison.cpp tableComparison.h)
 
 
 #https://stackoverflow.com/questions/20382549/cmake-for-tesseract-and-opencv#20392329

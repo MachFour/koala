@@ -9,33 +9,42 @@
 #include <string>
 #include <iterator>
 #include <algorithm>
+#include <stdexcept>
 
 class Table {
     using string = std::string;
     using stringVector = std::vector<std::string>;
 
 public:
-    Table(size_t columns) : columns(columns) {};
+    explicit Table(int columns) : columns(columns) {
+        if (columns < 0) {
+            throw std::invalid_argument("Number of columns must be positive");
+        }
+    }
 
     std::string parseableString(const char * colSep = "\f") const;
 
     string printableString(unsigned int minColumnWidth) const;
-    size_t numRows() const;
+    int numRows() const;
+    int numCols() const;
 
     // returns empty string if indices are out of range
-    string getText(size_t row, size_t col) const;
-    const stringVector& getRow(size_t row) const;
+    string getText(int row, int col) const;
+    const stringVector& getRow(int row) const;
 
 
     void addRow();
-    void setColumnText(size_t row, size_t col, std::string text);
+    void setColumnText(int row, int col, const std::string& text);
 
     static Table parseFromString(string tableString, string columnSep="\f");
-    static auto compareTable(const Table& actual, const Table& expected) -> std::pair<double, double>;
 
 private:
-    size_t columns;
-    std::vector<std::vector<std::string>> rows;
+    // bounds checking
+    void checkCol(int col) const;
+    void checkRow(int row) const;
+
+    int columns;
+    std::vector<stringVector> rows;
 };
 
 #endif //REFERENCE_TABLE_H

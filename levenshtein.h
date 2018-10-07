@@ -86,9 +86,12 @@ auto levenshtein(std::string a, std::string b) -> size_t {
  * Since LD(a, b) <= max(|a|, |b|), this is a rough way to create a
  * 'correctness' fraction using the Levenshtein distance function
  */
-double levenshteinScore(std::string a, std::string b) {
-    double maxLevDistance = static_cast<double>(std::max(a.size(), b.size()));
-    return 1.0 - levenshtein(a, b)/maxLevDistance;
+double levenshteinScore(const std::string& a, const std::string& b) {
+	if (a.empty() || b.empty()) {
+		return a.empty() && b.empty() ? 1.0 : 0.0;
+	}
+    auto maxLevDistance = std::max(a.size(), b.size());
+    return 1.0 - levenshtein(a, b)/(double)maxLevDistance;
 }
 
 #endif // LEVENSHTEIN_H

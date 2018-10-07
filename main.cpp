@@ -2,6 +2,7 @@
 #include "utils.h"
 #include "ocrutils.h"
 #include "InputParser.h"
+#include "tableComparison.h"
 
 #include <iostream>
 #include <cstdio>
@@ -16,6 +17,7 @@
 #endif
 
 #include <opencv2/core.hpp>
+#include <opencv2/imgproc.hpp>
 #include <opencv2/imgcodecs.hpp>
 
 using std::string;
@@ -44,15 +46,6 @@ std::string exec(const char * cmd) {
 }
 */
 
-std::string baseName(const char * fileName) {
-    std::string basename(fileName);
-    size_t lastSlash = basename.rfind('/');
-    if (lastSlash != std::string::npos) {
-        basename.erase(0, lastSlash);
-    }
-    return basename;
-}
-
 void testMain() {
     std::string filePath("est-images/output//home/max/uni/thesis/label-pics-cropped/img_2557.txt");
     std::string fileString = readFile(filePath);
@@ -64,63 +57,29 @@ void testMain() {
 static const char configPath[] = "/home/max/thesis/koala/data/tesseract.config";
 static const char dataPath[] = "/usr/share/tessdata/";
 
-static std::pair<double, double> doTableComparison(const Table& test, const string& truthFile, const string& testOutPath) {
-    bool doOutput = !testOutPath.empty();
-    string trueTableString = readFile(truthFile);
-    if (trueTableString.empty()) {
-        fprintf(stderr, "Ground truth table string could not be read");
-        return {-1, -1};
-    }
-    Table trueTable = Table::parseFromString(trueTableString, "\\");
-    std::pair<double, double> comparisonScore = Table::compareTable(test, trueTable);
-
-    if (doOutput) {
-        std::ofstream testOutFile(testOutPath);
-        using std::endl;
-        if (testOutFile.is_open()) {
-            testOutFile << endl << endl;
-            testOutFile << "**** Ground truth table comparison: ****" << endl;
-            testOutFile << "Ground truth table:" << endl;
-            testOutFile << trueTable.printableString(25) << endl;
-            testOutFile << endl << endl;
-            testOutFile << "Actual table:" << endl;
-            testOutFile << test.printableString(25) << endl;
-            testOutFile << endl << endl;
-            testOutFile << "Comparison scores:" << endl;
-            testOutFile << "Average key column accuracy: " << 100*comparisonScore.first << "%" << endl;
-            testOutFile << "Weighted value col accuracy: " << 100*comparisonScore.second << "%" << endl;
-        } else {
-            fprintf(stderr, "Could not write to test output file");
-        }
-    }
-
-    return comparisonScore;
-}
 
 int main(int argc, char ** argv) {
     // TODO add option to suppress image display
-    if (argc != 3 && argc != 4) {
-        printf("Usage: %s <input.img> [-o <output prefix>] [-t <ground truth.txt>]\n", argv[0]);
+    if (argc < 2 || argc > 7) {
+        printf("Usage: %s <input.img> [-o <output prefix>] [-t <ground truth.txt>] [-v]\n", argv[0]);
+        printf("Test output format: <filename>: <key col score> <value col score> <est. columns> <column discrepancy>\n");
         return -1;
     }
 
     InputParser ip(argc, argv);
-    if (ip.cmdOptionExists("-o")) {
-
-    }
-
-    const char * inFile = argv[1];
-    std::string outPrefix = ip.getCmdOption("-o");
-    std::string truthFile = ip.getCmdOption("-t");
+    string inFile = ip.getArg(0);
+    string outPrefix = ip.getCmdOption("-o");
+    string truthFile = ip.getCmdOption("-t");
 
     bool doTest = !truthFile.empty();
     bool doOutput = !outPrefix.empty();
     // if we have a ground truth file, assume it's batch mode
-    bool batchMode = doTest;
+    bool batchMode = doTest && !ip.cmdOptionExists("-v");
+
 
     cv::Mat image = imread(inFile, cv::IMREAD_GRAYSCALE);
     if (!image.data) {
-        fprintf(stderr, "Could not read input image!\n");
+        fprintf(stderr, "Could not read input image '%s'!\n", inFile.c_str());
         return 1;
     }
 
@@ -132,7 +91,7 @@ int main(int argc, char ** argv) {
 
     Mat clusteredWords;
     Table outTable = tableExtract(image, tesseractAPI, &clusteredWords, batchMode);
-    if (!batchMode) {
+    if (!batchMode && !clusteredWords.empty()) {
         showImage(clusteredWords);
     }
 
@@ -152,12 +111,15 @@ int main(int argc, char ** argv) {
             fprintf(stderr, "could not open output file for csv writing: %s\n", tableOutputPath.c_str());
         }
     }
+    if (!batchMode) {
+        std::cout << outTable.printableString(30);
+    }
 
     if (doTest) {
         std::string testOutputPath = doOutput ? outPrefix.append(".test") : "";
-        auto scores = doTableComparison(outTable, truthFile, testOutputPath);
-        printf("%s %.3f %.3f\n", baseName(inFile).c_str(), scores.first, scores.second);
-    } else {
-        std::cout << outTable.printableString(30);
+        auto name = basename(inFile).c_str();
+        auto s = doTableComparison(outTable, truthFile, testOutputPath);
+        printf("%s %.3f %.3f %d %+d\n", name, s.keyScore, s.valScore, s.actualCols, s.actualCols - s.expectedCols);
     }
+
 }

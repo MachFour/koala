@@ -15,22 +15,40 @@
  */
 
 struct wordBB {
-
-    wordBB(const cv::Rect& r) :
-            wordBB(r.x, r.y, r.width, r.height) {};
-
-    wordBB(int x, int y, int width, int height) :
-        x(x), y(y), width(width), height(height), row(0), column(0), rowColumnAssigned(false), text("") {};
-
     int x;
     int y;
     int width;
     int height;
-    unsigned int row;
-    unsigned int column;
-    bool rowColumnAssigned;
-
     std::string text;
+
+    explicit wordBB(const cv::Rect& r) : wordBB(r.x, r.y, r.width, r.height) {};
+
+    wordBB(int x, int y, int width, int height) :
+        x(x), y(y), width(width), height(height), text(""),
+        _row(0), _col(0), rowAssigned(false), colAssigned(false) {};
+
+
+    int row() const {
+        return _row;
+    }
+    int col() const {
+        return _col;
+    }
+
+    void setRow(int row) {
+        _row = row;
+        rowAssigned = true;
+    }
+    void setCol(int col) {
+        _col = col;
+        colAssigned = true;
+    }
+    bool isRowAssigned() const {
+        return rowAssigned;
+    }
+    bool isColAssigned() const {
+        return colAssigned;
+    }
 
     int getArea() const {
         return width*height;
@@ -42,11 +60,17 @@ struct wordBB {
 
     cv::Scalar getColour(bool useColumn=false) const {
         if (useColumn) {
-            return pseudoRandomColour(column);
+            return pseudoRandomColour(_col);
         } else {
             return pseudoRandomColour(x, y, width, height);
         }
     }
+private:
+    int _row;
+    int _col;
+    bool rowAssigned;
+    bool colAssigned;
+
 };
 
 #endif //REFERENCE_WORDBB_H

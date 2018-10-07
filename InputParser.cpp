@@ -19,6 +19,10 @@ InputParser::InputParser(int argc, char ** argv) {
     }
 }
 
+const std::string InputParser::getArg(const std::size_t index) const {
+    return (index < tokens.size()) ? tokens[index] : "";
+}
+
 const std::string InputParser::getCmdOption(const std::string &option) const {
     std::vector<std::string>::const_iterator itr;
     itr = find(tokens.begin(), tokens.end(), option);
