@@ -6,10 +6,11 @@
 #ifndef MEANSHIFT_H
 #define MEANSHIFT_H
 
+#include "ccomponent.h"
+
 #include <vector>
 #include <algorithm>
 #include <functional>
-#include "ccomponent.h"
 
 namespace meanShift {
     typedef std::vector<double> position;

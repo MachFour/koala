@@ -8,9 +8,6 @@
 #include <vector>
 #include <cmath>
 
-template<typename T>
-using vector = std::vector<T>;
-
 class Interval {
 public:
     // how to apply a length expansion when determining whether two line segments are close
@@ -27,10 +24,12 @@ public:
     double right() const { return midpoint + halflength; }
     int getLabel() const { return label; }
 
+
+
     // intervals vector needs to be copied because it's sorted
-    static void groupCloseIntervals(vector<Interval> intervals, vector<vector<Interval>> &partitions, double expansion);
-    static bool areClose(const Interval &, const Interval&, double expand = 1.0, ExpandType method = AVG);
-    static bool closeToAny(const Interval &, const vector<Interval> &others, double expand = 1.0,
+    static void groupCloseIntervals(std::vector<Interval>, std::vector<std::vector<Interval>>&, double);
+    static bool areClose(const Interval&, const Interval&, double expand = 1.0, ExpandType method = AVG);
+    static bool closeToAny(const Interval&, const std::vector<Interval>& others, double expand = 1.0,
             ExpandType method = AVG);
 
 private:

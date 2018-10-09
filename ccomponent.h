@@ -15,6 +15,7 @@ struct CComponent {
     int width;
     int height;
     int area;
+    double aspectRatio;
     double centroidX;
     double centroidY;
     int label;

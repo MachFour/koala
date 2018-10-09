@@ -1,5 +1,5 @@
 #include "reference.h"
-#include "utils.h"
+#include "helpers.h"
 #include "ocrutils.h"
 #include "InputParser.h"
 #include "tableComparison.h"
@@ -89,7 +89,7 @@ int main(int argc, char ** argv) {
         return 1;
     }
 
-    Mat clusteredWords;
+    cv::Mat clusteredWords;
     Table outTable = tableExtract(image, tesseractAPI, &clusteredWords, batchMode);
     if (!batchMode && !clusteredWords.empty()) {
         showImage(clusteredWords);
@@ -119,7 +119,7 @@ int main(int argc, char ** argv) {
         std::string testOutputPath = doOutput ? outPrefix.append(".test") : "";
         auto name = basename(inFile).c_str();
         auto s = doTableComparison(outTable, truthFile, testOutputPath);
-        printf("%s %.3f %.3f %d %+d\n", name, s.keyScore, s.valScore, s.actualCols, s.actualCols - s.expectedCols);
+        printf("%s %.3f %.3f %+d\n", name, s.keyScore, s.valScore, s.actualCols - s.expectedCols);
     }
 
 }

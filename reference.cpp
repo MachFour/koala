@@ -8,7 +8,8 @@
 #include "ccomponent.h"
 #include "plotutils.h"
 #include "table.h"
-#include "utils.h"
+#include "helpers.h"
+#include "matutils.h"
 #include "ocrutils.h"
 #include "wordBB.h"
 
@@ -34,6 +35,10 @@
 #include <numeric>
 #include <stdexcept>
 
+
+using cv::Mat;
+using std::vector;
+
 // global parameters in terms of the size of the input image
 
 // const int CENTROID_CLUSTER_BANDWIDTH = 20;
@@ -47,6 +52,19 @@ static int minCCArea(int w, int h) {
     return std::max(10, w*h/37500);
 }
 
+// Returns whether x is in the closed interval [a, b]
+// make sure that a <= b!
+template<typename T>
+static bool inInterval(T x, T a, T b) {
+    return x >= a && x <= b;
+}
+
+// width : height
+static double aspectRatio(int width, int height) {
+    return std::max(1, width)/(double) std::max(1, height);
+}
+
+
 /*
 const int MIN_COMBINED_RECT_AREA = 1000;
 const int MAX_COMBINED_RECT_AREA = 2000*1500/4;
@@ -55,6 +73,19 @@ const int MAX_COMBINED_RECT_HEIGHT = 1500/4;
 const int MIN_COMBINED_RECT_WIDTH = 2000/200;
 const int MAX_COMBINED_RECT_WIDTH = 2000/4;
  */
+const double MAX_CC_ASPECT_RATIO = 10;
+const double MIN_CC_ASPECT_RATIO = 0.05;
+const double MAX_RECT_ASPECT_RATIO = 10;
+const double MIN_RECT_ASPECT_RATIO = 0.2;
+
+/*
+ * Connected component and combined CC / wordBB size
+ */
+static bool isPlausibleCCSize(const CComponent& c, int imgW, int imgH) {
+    return c.area >= minCCArea(imgW, imgH) &&
+        inInterval(c.aspectRatio, MIN_CC_ASPECT_RATIO, MAX_CC_ASPECT_RATIO);
+}
+
 static bool isPlausibleWordBBSize(const wordBB& w, int imgW, int imgH) {
     int imageArea = imgW*imgH;
     int wordArea = w.getArea();
@@ -66,20 +97,22 @@ static bool isPlausibleWordBBSize(const wordBB& w, int imgW, int imgH) {
     int maxHeight = imgH/4;
     int minWidth = imgW/200;
     int maxWidth = imgW/2;
-    // TODO aspect ratio
+    double ratio = aspectRatio(wordW, wordH);
 
-    return wordW >= minWidth && wordH >= minHeight && wordArea >= minArea
-        && wordW <= maxWidth && wordH <= maxHeight && wordArea <= maxArea;
+    return inInterval(wordW, minWidth, maxWidth)
+           && inInterval(wordH, minHeight, maxHeight)
+           && inInterval(wordArea, minArea, maxArea)
+           && inInterval(ratio, MIN_RECT_ASPECT_RATIO, MAX_RECT_ASPECT_RATIO);
 }
 
 /*
  * Stages of main processing
  */
-static Mat preprocess(const Mat& image, bool batchMode);
-static vector<vector<wordBB>> findWords(const Mat &binarised, bool batchMode);
-static void classifyColumns(std::vector<wordBB>& words, int numColumns, int imageWidth, bool batchMode=true);
-static void doOcr(const Mat& imageForOcr, tesseract::TessBaseAPI& tesseractAPI, vector<wordBB> & allWordBBs);
-static Table createTable(const vector<wordBB>& allWordBBs, int estimatedColumns);
+static Mat preprocess(const Mat&, bool);
+static vector<vector<wordBB>> findWords(const Mat&, bool);
+static void classifyColumns(std::vector<wordBB>&, int, int, bool batchMode=true);
+static void doOcr(const Mat&, tesseract::TessBaseAPI&, vector<wordBB>&);
+static Table createTable(const vector<wordBB>&, int);
 
 
 Table tableExtract(const Mat &image, tesseract::TessBaseAPI& tesseractAPI, cv::Mat * wordBBImg, bool batchMode) {
@@ -159,29 +192,34 @@ Table tableExtract(const Mat &image, tesseract::TessBaseAPI& tesseractAPI, cv::M
     }
 
     Mat smoothedRectCutDensity;
+    // try to remove 'low frequency' component
+    Mat extraSmoothedRectCutDensity;
+
     {
-        int blurSize = image.cols / 16;
-        if (blurSize % 2 == 0) {
-            blurSize++;
-        }
-        cv::GaussianBlur(rectsCutByXCount64F, smoothedRectCutDensity, cv::Size(blurSize, blurSize), 0, 0);
+        // have to make blur size odd
+        auto width = image.cols;
+        auto blurSize = width/16 + ((width/16) % 2 == 0);
+        auto extraBlurSize = width - (width % 2 == 0);
+        // treat 'outside the image' as zero
+        cv::GaussianBlur(rectsCutByXCount64F, smoothedRectCutDensity, cv::Size(blurSize, blurSize), 0, 0, cv::BORDER_ISOLATED);
+        cv::GaussianBlur(rectsCutByXCount64F, extraSmoothedRectCutDensity, cv::Size(extraBlurSize, extraBlurSize), 0, 0, cv::BORDER_ISOLATED);
         //cv::normalize(smoothedRectCutDensity)
 
 #ifndef REFERENCE_ANDROID
         if (!batchMode) {
             cv::Ptr<Plot> plotCounts = makePlot(rectsCutByXCount64F, &image);
             cv::Ptr<Plot> plotSmoothedCounts = makePlot(smoothedRectCutDensity, &image);
+            cv::Ptr<Plot> plotExtraSmoothedCounts = makePlot(extraSmoothedRectCutDensity, &image);
             Mat plotResultCounts;
-            {
-                plotCounts->render(plotResultCounts);
-            }
             Mat plotResultSmoothedCounts;
-            {
-                plotSmoothedCounts->render(plotResultSmoothedCounts);
-            }
+            Mat plotResultExtraSmoothedCounts;
+            plotCounts->render(plotResultCounts);
+            plotSmoothedCounts->render(plotResultSmoothedCounts);
+            plotExtraSmoothedCounts->render(plotResultExtraSmoothedCounts);
 
             showImage(0.5 * plotResultCounts + 0.5 * rects);
             showImage(0.5 * plotResultSmoothedCounts + 0.5 * rects);
+            showImage(0.3 * plotResultSmoothedCounts + 0.3*plotResultExtraSmoothedCounts + 0.4 * rects);
         }
 #endif // REFERENCE_ANDROID
     }
@@ -232,8 +270,9 @@ Table tableExtract(const Mat &image, tesseract::TessBaseAPI& tesseractAPI, cv::M
                 // subtract from 1.0 to get threshold referred to bottom of image, not top
                 auto q75YCoord = static_cast<int>((1.0 - q75 / maxVal) * plotResultThresh.rows);
                 auto q60YCoord = static_cast<int>((1.0 - q60 / maxVal) * plotResultThresh.rows);
-                cv::rectangle(plotResultThresh, cv::Rect(0, q75YCoord, plotResultThresh.cols - 1, 1), 255, 5);
-                cv::rectangle(plotResultThresh, cv::Rect(0, q60YCoord, plotResultThresh.cols - 1, 1), 255, 5);
+                auto red = cv::Scalar(0, 0, 255); // B, G, R
+                cv::rectangle(plotResultThresh, cv::Rect(0, q75YCoord, plotResultThresh.cols - 1, 1), red, 5);
+                cv::rectangle(plotResultThresh, cv::Rect(0, q60YCoord, plotResultThresh.cols - 1, 1), red, 5);
             }
             showImage(0.5 * plotResultThresh + 0.5 * rects);
         }
@@ -264,7 +303,7 @@ Table tableExtract(const Mat &image, tesseract::TessBaseAPI& tesseractAPI, cv::M
     return t;
 }
 
-static void classifyColumns(vector<wordBB>& words, int estimatedColumns, int imageWidth, bool batchMode) {
+static void classifyColumns(vector<wordBB>& words, int numColumns, int imageWidth, bool batchMode) {
     // now put horizontal centres of all wordBBs into a Mat and run kmeans
     Mat wordBBcentroidX((int) words.size(), 1, CV_64FC1);
     for (unsigned int i = 0; i < words.size(); ++i) {
@@ -274,7 +313,7 @@ static void classifyColumns(vector<wordBB>& words, int estimatedColumns, int ima
     }
 
     if (!batchMode) {
-        printf("Mixture model with %u components and centroid X values:\n", estimatedColumns);
+        printf("Mixture model with %u components and centroid X values:\n", numColumns);
         for (unsigned int i = 0; i < words.size(); ++i) {
             printf("%.1f, ", wordBBcentroidX.at<double>(i, 0));
         }
@@ -288,19 +327,19 @@ static void classifyColumns(vector<wordBB>& words, int estimatedColumns, int ima
      * (This wasn't easy to do with the k-means algorithm)
      */
     auto emAlg = cv::ml::EM::create();
-    emAlg->setClustersNumber(estimatedColumns);
+    emAlg->setClustersNumber(numColumns);
     //emAlg->setTermCriteria(termCriteria);
     // since we're in 1D, COV_MAT_DIAGONAL (separate sigma for each dim)
     // is equivalent to COV_MAT_SPHERICAL (all dims have same sigma)
     emAlg->setCovarianceMatrixType(cv::ml::EM::Types::COV_MAT_SPHERICAL);
-    Mat initialMeans(estimatedColumns, 1, CV_64FC1);
-    for (auto i = 0; i < estimatedColumns; ++i) {
+    Mat initialMeans(numColumns, 1, CV_64FC1);
+    for (auto i = 0; i < numColumns; ++i) {
         // want the centre (hence +0.5) of the ith column,
-        // when image is divided into estimatedColumns parts of equal width
-        initialMeans.at<double>(i, 0) = (i + 0.5) / estimatedColumns * imageWidth;
+        // when image is divided into numColumns parts of equal width
+        initialMeans.at<double>(i, 0) = (i + 0.5) / numColumns * imageWidth;
     }
     if (!batchMode) {
-        for (auto i = 0; i < estimatedColumns; ++i) {
+        for (auto i = 0; i < numColumns; ++i) {
             printf("Mixture %d initial mean: %f\n", i, initialMeans.at<double>(i, 0));
         }
     }
@@ -316,19 +355,19 @@ static void classifyColumns(vector<wordBB>& words, int estimatedColumns, int ima
 
     Mat means = emAlg->getMeans();
     if (!batchMode) {
-        for (auto i = 0; i < estimatedColumns; ++i) {
+        for (auto i = 0; i < numColumns; ++i) {
             printf("Mixture %d: mean=%f\n", i, means.at<double>(i));
         }
     }
 
     /*
     //Mat outputCentres;
-    cv::kmeans(wordBBcentroidX, estimatedColumns, bestLabels, termCriteria, 3, cv::KMEANS_PP_CENTERS, outputCentres);
+    cv::kmeans(wordBBcentroidX, numColumns, bestLabels, termCriteria, 3, cv::KMEANS_PP_CENTERS, outputCentres);
     */
     // apply column labels
     {
         /* Labels might not be in order of left-to-right columns, so we need to create this mapping */
-        vector<int> labelOrder(estimatedColumns, 0);
+        vector<int> labelOrder(numColumns, 0);
         std::iota(labelOrder.begin(), labelOrder.end(), 0);
         std::sort(labelOrder.begin(), labelOrder.end(), [&means](int a, int b) -> bool {
             return means.at<double>(a) < means.at<double>(b);
@@ -347,57 +386,98 @@ static void classifyColumns(vector<wordBB>& words, int estimatedColumns, int ima
 }
 
 
-// do dumb threshold to figure out whether it's white on black or black on white text, and invert if necessary
-// assumes that there is actually a clear majority of one over the other (i.e many more background pixels than foreground)
-// ensure m has type CV_8UC1
-static void makeWhiteTextOnBlack(Mat& m) {
-    if (m.depth() != CV_8U) {
-        throw std::invalid_argument("matrix must be CV_8U");
-    }
-    Mat dumbThreshold;
-    cv::equalizeHist(m, dumbThreshold);
-    //cv::threshold(dumbThreshold, dumbThreshold, 0, 255, cv::THRESH_OTSU);
-    cv::adaptiveThreshold(dumbThreshold, dumbThreshold, 255, CV_ADAPTIVE_THRESH_MEAN_C, CV_THRESH_BINARY, 399, 0);
-    if (cv::countNonZero(dumbThreshold) >= dumbThreshold.rows * dumbThreshold.cols / 2) {
-        // it seems like black text on white, invert it
-        m = 255 - m;
-    }
-}
+static cv::Mat preprocess(const cv::Mat& image, bool batchMode) {
+    using cv::Mat;
 
-static Mat preprocess(const Mat& image, bool batchMode) {
     Mat grey;
-    Mat preprocessed;
 #ifdef REFERENCE_ANDROID
     // android images are RGBA after decoding
     cv::cvtColor(image, grey, CV_RGBA2GRAY);
 #else
     grey = image;
 #endif
-    grey.convertTo(preprocessed, CV_8UC1);
+    Mat grey8;
+    grey.convertTo(grey8, CV_8UC1);
 
     // do dumb threshold to figure out whether it's white on black or black on white text, and invert if necessary
-    makeWhiteTextOnBlack(preprocessed);
-
-
-    Mat linesRemoved;
-    // remove large horizontal and vertical lines
-    // use black hat instead of top hat since it's black on white
-    cv::morphologyEx(preprocessed, linesRemoved, cv::MorphTypes::MORPH_TOPHAT, structuringElement(250, 5, cv::MORPH_RECT));
-    cv::morphologyEx(linesRemoved, linesRemoved, cv::MorphTypes::MORPH_TOPHAT, structuringElement(5, 250, cv::MORPH_RECT));
-
-    if (!batchMode) {
-        showImage(image);
-        showImage(preprocessed);
-        showImage(linesRemoved);
-    }
+    Mat whiteOnBlack = isWhiteTextOnBlack(grey8) ? grey8 : invert(grey8);
+    Mat whiteOnBlackF = eightBitToFloat(whiteOnBlack, false);
 
     Mat textEnhanced;
-    // another strategy from https://stackoverflow.com/questions/10196198/how-to-remove-convexity-defects-in-a-sudoku-square
-    // to have uniform brightness, divide image by result of closure than subtract the result, divide it
-    int blackhatKSize = std::max(image.rows, image.cols)/50;
-    cv::Mat sElement = structuringElement(blackhatKSize, cv::MORPH_ELLIPSE);
-    morphologyEx(linesRemoved, textEnhanced, cv::MorphTypes::MORPH_TOPHAT, sElement);
+    Mat textEnhancedSub;
+    Mat textEnhancedSubF;
+    Mat textEnhancedDiv;
+    Mat textEnhancedDivF;
+    for (int div = 5; div < 100; div += 5) {
+        const auto openingKsize = std::max(whiteOnBlack.rows, whiteOnBlack.cols)/div;
+        const Mat sElement = structuringElement(openingKsize, cv::MORPH_RECT);
+        textEnhancedSub = textEnhance(whiteOnBlack, sElement, false);
+        textEnhancedSubF = textEnhance(whiteOnBlackF, sElement, false);
+        textEnhancedDiv = textEnhance(whiteOnBlack, sElement,  true);
+        textEnhancedDivF = textEnhance(whiteOnBlackF, sElement, true);
+        std::string subTitle = "textEnhancedSub, div = ";
+        std::string subFTitle = "textEnhancedSubF, div = ";
+        std::string divTitle = "textEnhancedDiv, div = ";
+        std::string divFTitle = "textEnhancedDivF, div = ";
+        subTitle.append(std::to_string(div));
+        subFTitle.append(std::to_string(div));
+        divTitle.append(std::to_string(div));
+        divFTitle.append(std::to_string(div));
+        if (!batchMode) {
+            showImage(textEnhancedSub, subTitle);
+            showImage(textEnhancedSubF, subFTitle);
+            showImage(textEnhancedDiv, divTitle);
+            showImage(textEnhancedDivF, divFTitle);
+        }
+    }
+
+
+    Mat preprocessed;
+    return preprocessed;
+
+    Mat vLines;
+    Mat hLines;
+    // remove large horizontal and vertical lines
+    // use black hat instead of top hat since it's black on white
+    cv::morphologyEx(preprocessed, hLines, cv::MorphTypes::MORPH_OPEN, structuringElement(250, 5, cv::MORPH_RECT));
+    cv::morphologyEx(preprocessed, vLines, cv::MorphTypes::MORPH_OPEN, structuringElement(5, 250, cv::MORPH_RECT));
+    //Mat opened;
+    //cv::morphologyEx(linesRemoved, opened, cv::MorphTypes::MORPH_OPEN, structuringElement(12, 12, cv::MORPH_ELLIPSE));
+
+    // (gaussian) blur -> matches vision character
+    // before doing the morphological operation - makes intensities more uniform in th
+    // don't use the binarised (or blurred) image for OCR (don't throw away)
+    // histogram of gradients
+
+    if (!batchMode) {
+        showImage(image, "image");
+        //showImage(preprocessed, "preprocessed");
+        showImage(vLines, "vlines");
+        showImage(hLines, "hlines");
+    }
+
+    /*
+    morphologyEx(255-linesRemoved, textEnhanced, cv::MorphTypes::MORPH_TOPHAT, sElement);
     cv::normalize(textEnhanced, textEnhanced, 0, 255, cv::NORM_MINMAX);
+
+    cv::Mat closed;
+    morphologyEx(linesRemoved, closed, cv::MorphTypes::MORPH_CLOSE, sElement);
+    cv::Mat closedF;
+    cv::Mat linesF;
+    closed.convertTo(closedF, CV_64FC1, 1.0/255);
+    linesRemoved.convertTo(linesF, CV_64FC1, 1.0/255);
+    cv::Mat dividedF = linesF.mul(closedF);
+    cv::normalize(dividedF, dividedF, 0, 1, cv::NORM_MINMAX);
+    cv::Mat divided;
+    dividedF.convertTo(divided, CV_8UC1, 255);
+    if (!batchMode) {
+        showImage(closed);
+        showImage(divided);
+    }
+     */
+
+    textEnhanced = preprocessed;
+
 
     //clean it up a bit?
     // shapes: MORPH_RECT, MORPH_CROSS, MORPH_ELLIPSE
@@ -411,8 +491,8 @@ static Mat preprocess(const Mat& image, bool batchMode) {
     cv::threshold(textEnhanced, binarised, 0, 255, cv::THRESH_OTSU);
 
     if (!batchMode) {
-        showImage(textEnhanced);
-        showImage(binarised);
+        showImage(textEnhanced, "text enhanced");
+        showImage(binarised, "binarised");
     }
 
     return binarised;
@@ -444,6 +524,7 @@ vector<vector<wordBB>> findWords(const Mat &binarised, bool batchMode) {
         cc.height = stats.at<int>(label, cv::CC_STAT_HEIGHT);
         cc.width = stats.at<int>(label, cv::CC_STAT_WIDTH);
         cc.area = stats.at<int>(label, cv::CC_STAT_AREA);
+        cc.aspectRatio = aspectRatio(cc.width, cc.height);
         cc.centroidX = centroids.at<double>(label, 0);
         cc.centroidY = centroids.at<double>(label, 1);
         allCCs.push_back(cc);
@@ -451,7 +532,7 @@ vector<vector<wordBB>> findWords(const Mat &binarised, bool batchMode) {
 
     vector<meanShift::Point<CComponent>> yCentroids;
     for (CComponent &cc: allCCs) {
-        if (cc.area >= minCCArea(binarised.cols, binarised.rows)) {
+        if (isPlausibleCCSize(cc, binarised.cols, binarised.rows)) {
             //yCentroids.push_back(meanShift::Point {i, {centroidY}});
             // include height and width in clustering decision
             auto ccHeight = static_cast<double>(cc.height);
@@ -486,33 +567,37 @@ vector<vector<wordBB>> findWords(const Mat &binarised, bool batchMode) {
      */
     vector<ccCluster> clustersByCentroid/*(centroidClusters.getSize())*/;
     for (ccCluster &ithCluster : ccClusters) {
-        vector<meanShift::Point<CComponent>> ccLabelsInCluster/*(centroidClusters.getSize())*/;
         // use to find median of cluster height
-        vector<int> heights;
-        long sumHeight = 0;
-        long sumSqHeight = 0;
-        for (CComponent &cc : ithCluster.getData()) {
-            sumHeight += cc.height;
-            sumSqHeight += cc.height * cc.height;
-            heights.push_back(cc.height);
-            auto heightD = static_cast<double>(cc.height);
-            //double widthD = static_cast<double>(cc.width);
-            ccLabelsInCluster.emplace_back(meanShift::Point<CComponent>{cc, {heightD}});
+        const auto CCs = ithCluster.getData();
+        const auto firstCC = CCs.cbegin();
+        const auto lastCC = CCs.cend();
+        using std::accumulate;
+        const auto sumHeight = accumulate(firstCC, lastCC, 0, [](long total, const CComponent& cc) -> long {
+            return total + cc.height;
+        });
+        const auto sumSqHeight = accumulate(firstCC, lastCC, 0, [](long total, const CComponent& cc) -> long {
+            return total + cc.height*cc.height;
+        });
+        vector<meanShift::Point<CComponent>> ccLabelsInCluster/*(centroidClusters.getSize())*/;
+        for (const CComponent &cc : CCs) {
+            // add width too?
+            ccLabelsInCluster.emplace_back(meanShift::Point<CComponent>{cc, {(double)cc.height}});
         }
         // actually should use median height
         // TODO justify bandwidth parameter
         // should be scale invariant! -> mean, median, mode?
 
-        auto n = heights.size();
-        double avgHeight = sumHeight / (double) n;
-        double stddev = sqrt((1.0 * sumSqHeight) / n - avgHeight * avgHeight);
+        auto n = static_cast<double>(CCs.size());
+        double avgHeightSquared = (sumHeight/n)*(sumHeight/n);
+        // sqrt(E[X^2] - E[X]^2)
+        double stddev = sqrt(sumSqHeight/n - avgHeightSquared);
         //double mean = (1.0*sumHeight)/heights.size();
         //double median = findMedian(heights);
         double bwMultiplier = 1.0;
         ccClusterList heightClusters = meanShift::cluster<CComponent>(ccLabelsInCluster, stddev * bwMultiplier);
         heightClusters.sortBySize();
-        auto biggest = heightClusters[0];
-        clustersByCentroid.push_back(biggest);
+        // save biggest
+        clustersByCentroid.push_back(heightClusters[0]);
     }
 
     //showCentroidClusters(binarised, clustersByCentroid);
@@ -533,11 +618,9 @@ vector<vector<wordBB>> findWords(const Mat &binarised, bool batchMode) {
         vector<vector<Interval>> closeCCsInCluster;
         vector<Interval> intervals;
         for (CComponent cc : c.getData()) {
-            auto left = static_cast<double>(cc.left);
-            auto width = static_cast<double>(cc.width);
-            intervals.push_back(Interval(cc.label, left, left + width));
+            intervals.emplace_back(Interval(cc.label, (double)cc.left, (double) cc.left + cc.width));
         }
-        Interval::groupCloseIntervals(intervals, closeCCsInCluster, 1.5);
+        Interval::groupCloseIntervals(intervals, closeCCsInCluster, 2.0);
         // TODO prevent them from getting too big?
         // TODO also make sure that they overlap vertically
 
@@ -547,7 +630,7 @@ vector<vector<wordBB>> findWords(const Mat &binarised, bool batchMode) {
 
         // make rects for each partition
         for (vector<Interval> &group : closeCCsInCluster) {
-            wordBB w = wordBB(findBoundingRect(group, allCCs, binarised.rows, binarised.cols));
+            wordBB w(findBoundingRect(group, allCCs, binarised.cols, binarised.rows));
             // simple filtering
             // remove unlikely sized 'words'
             if (isPlausibleWordBBSize(w, binarised.cols, binarised.rows)) {

@@ -6,17 +6,17 @@
 #include "ccomponent.h"
 #include "Interval.h"
 #include "randomColour.h"
-#include "utils.h"
+#include "helpers.h"
 
 #include <opencv2/core.hpp>
-#include <opencv2/highgui.hpp>
-#include <opencv2/imgcodecs.hpp>
 
 #include <vector>
 #include <iostream>
 #include <algorithm>
 #include <fstream>
 
+using std::vector;
+using cv::Mat;
 
 
 void drawCC(Mat& img, const CComponent& cc, cv::Scalar colour) {
@@ -42,7 +42,7 @@ void drawCC(Mat& img, const CComponent& cc, cv::Scalar colour) {
 
 }
 
-cv::Rect findBoundingRect(const vector<Interval>& intervals, const vector<CComponent>& allCCs, int maxHeight, int maxWidth) {
+cv::Rect findBoundingRect(const vector<Interval>& intervals, const vector<CComponent>& allCCs, int maxWidth, int maxHeight) {
     int minTop = maxHeight; // >= anything inside image
     int minLeft = maxWidth; // >= anything inside image
     int maxBottom = 0; // <= smaller than anything inside image
@@ -67,38 +67,6 @@ cv::Rect findBoundingRect(const vector<Interval>& intervals, const vector<CCompo
     return cv::Rect(minLeft, minTop, rectWidth, rectHeight);
 }
 
-std::string type2str(int type) {
-    std::string r;
-
-    int depth = type & CV_MAT_DEPTH_MASK;
-    int chans = 1 + (type >> CV_CN_SHIFT);
-
-    switch (depth) {
-        case CV_8U:  r = "8U"; break;
-        case CV_8S:  r = "8S"; break;
-        case CV_16U: r = "16U"; break;
-        case CV_16S: r = "16S"; break;
-        case CV_32S: r = "32S"; break;
-        case CV_32F: r = "32F"; break;
-        case CV_64F: r = "64F"; break;
-        default:     r = "User"; break;
-    }
-
-    r += "C";
-    r += (chans+'0');
-
-    return r;
-}
-
-Mat structuringElement(int size, cv::MorphShapes shape) {
-    // point (-1, -1) represents centred structuring element
-    return structuringElement(size, size, shape);
-}
-
-Mat structuringElement(int width, int height, cv::MorphShapes shape) {
-    // point (-1, -1) represents centred structuring element
-    return getStructuringElement(shape, cv::Size(width, height) /*, cv::point anchor = cv::point(-1, -1) */);
-}
 
 int findMedian(vector<int> numbers) {
     auto n = numbers.size();
@@ -132,6 +100,44 @@ void showCentroidClusters(const Mat& image, const vector<ccCluster>& clustersByC
     showImage(clusteredCCs);
 }
 
+// input must be either CV_8U, CV_32F or CV_64F
+cv::Mat textEnhance(const Mat& whiteOnBlack, const Mat& structuringElement, bool doDivide) {
+    Mat background;
+    Mat unnormalised;
+    if (doDivide) {
+        /* strategy from https://stackoverflow.com/questions/10196198/how-to-remove-convexity-defects-in-a-sudoku-square
+         * to have uniform brightness, divide image by result of closure
+         * needs a black on white image
+         */
+        Mat blackOnWhite = invert(whiteOnBlack);
+        Mat lightBackground;
+        cv::morphologyEx(blackOnWhite, lightBackground, cv::MorphTypes::MORPH_CLOSE, structuringElement);
+
+        // need to use floating point Mat for division
+        if (blackOnWhite.depth() == CV_8U) {
+            unnormalised = invert(eightBitToFloat(blackOnWhite) / eightBitToFloat(lightBackground));
+        } else {
+            unnormalised = invert(blackOnWhite / lightBackground);
+        }
+    } else {
+        Mat darkBackground;
+        cv::morphologyEx(whiteOnBlack, darkBackground, cv::MorphTypes::MORPH_OPEN, structuringElement);
+        unnormalised = whiteOnBlack - darkBackground;
+    }
+    // output bitness is same as input
+    auto outDepth = whiteOnBlack.depth();
+
+    Mat normalised;
+    cv::normalize(unnormalised, normalised, 0, maxVal(outDepth), cv::NORM_MINMAX, outDepth);
+    /*
+    showImage(background, "background");
+    showImage(unnormalised, "unnormalised");
+    showImage(normalised, "normalised");
+    */
+
+    return normalised;
+}
+
 void showRowBounds(const Mat& image, const vector<ccCluster>& clustersByCentroid) {
     /*
      * for each row, find top and bottom bounds
@@ -150,7 +156,7 @@ void showRowBounds(const Mat& image, const vector<ccCluster>& clustersByCentroid
         }
         // rect parameters: x, y, width, height
         // we'll use width for getSize, height for height
-        rowBounds.push_back(cv::Rect(0, minY, clusterSize, maxY - minY));
+        rowBounds.emplace_back(cv::Rect(0, minY, clusterSize, maxY - minY));
     }
 
     // now draw on rows
@@ -187,17 +193,6 @@ Mat overlayWords(const Mat &image, const vector<wordBB> &allWordBBs, bool colour
     return rectImg;
 }
 
-// element-wise derivative/difference along first dimension
-// matrix must be CV_64F
-Mat derivative(const Mat& src) {
-    Mat deriv(src.rows, src.cols, CV_64FC1, cv::Scalar(0));
-    for (int x = 0; x < src.cols; ++x) {
-        for (int y = 1; y < src.rows; ++y) {
-            deriv.at<double>(y, x) = src.at<double>(y, x) - src.at<double>(y-1, x);
-        }
-    }
-    return deriv;
-}
 
 // https://codereview.stackexchange.com/questions/22901/reading-all-bytes-from-a-file
 // https://en.cppreference.com/w/cpp/io/basic_istream/read
@@ -241,27 +236,3 @@ std::string basename(std::string filename, bool removeExtension) {
 }
 
 
-void showImage(const Mat& img) {
-#ifndef REFERENCE_ANDROID
-    namedWindow("output", cv::WINDOW_NORMAL);
-    cv::imshow("output", img);
-    cv::resizeWindow("output", 1024, 768);
-    cv::waitKey(0);
-#endif
-}
-
-int saveImage(const Mat &img, const char *outFile) {
-    bool result = false;
-#ifndef REFERENCE_ANDROID
-    try {
-        result |= cv::imwrite(outFile, img);
-        if (!result) {
-            fprintf(stderr, "Error saving images\n");
-        }
-    } catch (const cv::Exception& ex) {
-        fprintf(stderr, "exception writing images: %s\n", ex.what());
-    }
-#endif
-    // result = true -> return 0 for no error
-    return !result;
-}

@@ -2,12 +2,12 @@
 // Created by max on 8/2/18.
 //
 
-#include <vector>
-#include <algorithm>
 #include "Interval.h"
 
-template <typename T>
-using vector = std::vector<T>;
+#include <vector>
+#include <algorithm>
+
+using std::vector;
 
 bool Interval::areClose(const Interval &i1, const Interval &i2, double expand, ExpandType method) {
     double dist = distance(i1.midpoint, i2.midpoint);
@@ -47,7 +47,7 @@ void Interval::groupCloseIntervals(vector<Interval> intervals, vector<vector<Int
     // since we sorted by left edge, adjacent intervals will all be contiguous in the intervals vector
     for (unsigned int i = 0; i < intervals.size(); ++i)  {
         // there are more intervals left, so add a new partition to the output array
-        partitions.push_back(std::vector<Interval>());
+        partitions.emplace_back(std::vector<Interval>());
         vector<Interval>& currentPartition = partitions.back();
         currentPartition.push_back(intervals[i]);
         // find how many subsequent intervals overlap

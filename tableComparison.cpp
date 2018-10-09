@@ -4,7 +4,7 @@
 
 #include "tableComparison.h"
 #include "table.h"
-#include "utils.h"
+#include "helpers.h"
 #include "levenshtein.h"
 
 #include <vector>
@@ -61,19 +61,21 @@ comparisonResult compareTable(const Table& actual, const Table& expected) {
     }
 
     // mapping from rows in Expected to assigned rows in Actual (injective mapping, not necessarily surjective)
-    vector<int> actualRowForExpRow(E, 0);
+    std::vector<int> actualRowForExpRow(E, 0);
     {
-        vector<bool> rowAssigned((size_t)E, false);
+        std::vector<bool> expectedRowAssigned((size_t)E, false);
+        std::vector<bool> actualRowAssigned((size_t)A, false);
         decltype(E) rowsAssigned = 0;
         // now the pairs are sorted with closest string pairs first
         // just greedily assign the expected table rows to the actual rows, by closes string matching
         for (const pair<int, int> &matchings : indexPairs) {
             auto actualRowIdx = matchings.first;
             auto expectedRowIdx = matchings.second;
-            if (!rowAssigned[expectedRowIdx]) {
+            if (!expectedRowAssigned[expectedRowIdx] && !actualRowAssigned[actualRowIdx]) {
                 // assign it
                 actualRowForExpRow[expectedRowIdx] = actualRowIdx;
-                rowAssigned[expectedRowIdx] = true;
+                expectedRowAssigned[expectedRowIdx] = true;
+                actualRowAssigned[actualRowIdx] = true;
                 rowsAssigned++;
                 if (rowsAssigned == E) {
                     // finished assigning all rows in ground truth table
@@ -91,8 +93,8 @@ comparisonResult compareTable(const Table& actual, const Table& expected) {
     */
 
     // levenshtein distance
-    vector<double> keyColScores; // holds levenshtein distance for the between first columns (keys) in each row
-    vector<double> avgValueColScores; // holds the average levenshtein distance for the remaining columns in each row
+    std::vector<double> keyColScores; // holds levenshtein distance for the between first columns (keys) in each row
+    std::vector<double> avgValueColScores; // holds the average levenshtein distance for the remaining columns in each row
     {
         reserveSpace(keyColScores, E);
         reserveSpace(avgValueColScores, E);
@@ -134,7 +136,8 @@ comparisonResult compareTable(const Table& actual, const Table& expected) {
     double weightedAvgValueColumnScore = 0.0;
 
     for (decltype(E) i = 0; i < E; ++i) {
-        auto rowWeight = keyColScores[i] / sumKeyColScores;
+        // if key col scores were zero match, just use equal weighting
+        auto rowWeight = sumKeyColScores != 0 ? keyColScores[i] / sumKeyColScores : 1.0/E;
         weightedAvgValueColumnScore += rowWeight * avgValueColScores[i];
     }
 
