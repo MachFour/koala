@@ -43,27 +43,26 @@ void drawCC(Mat& img, const CComponent& cc, cv::Scalar colour) {
 }
 
 cv::Rect findBoundingRect(const vector<Interval>& intervals, const vector<CComponent>& allCCs, int maxWidth, int maxHeight) {
-    int minTop = maxHeight; // >= anything inside image
-    int minLeft = maxWidth; // >= anything inside image
-    int maxBottom = 0; // <= smaller than anything inside image
-    int maxRight = 0; // <= smaller than anything inside image
+    auto minTop = maxHeight; // >= anything inside image
+    auto minLeft = maxWidth; // >= anything inside image
+    auto maxBottom = 0; // <= smaller than anything inside image
+    auto maxRight = 0; // <= smaller than anything inside image
     for (const Interval& iv : intervals) {
         // TODO avoid indexing back into global list
-        int label = iv.getLabel();
-        int top = allCCs[label].top;
-        int height = allCCs[label].height;
-        int width = allCCs[label].width;
-        int left = allCCs[label].left;
+        auto label = iv.getLabel();
+        auto top = allCCs[label].top;
+        auto height = allCCs[label].height;
+        auto width = allCCs[label].width;
+        auto left = allCCs[label].left;
         minTop = std::min(top, minTop);
         minLeft = std::min(left, minLeft);
         maxBottom = std::max(top + height, maxBottom);
         maxRight = std::max(left + width, maxRight);
     }
     // left(x), top(y), width, height
-    int rectHeight = maxBottom - minTop;
-    int rectWidth = maxRight - minLeft;
+    auto rectHeight = maxBottom - minTop;
+    auto rectWidth = maxRight - minLeft;
 
-    // simple filtering
     return cv::Rect(minLeft, minTop, rectWidth, rectHeight);
 }
 
@@ -114,15 +113,17 @@ cv::Mat textEnhance(const Mat& whiteOnBlack, const Mat& structuringElement, bool
         cv::morphologyEx(blackOnWhite, lightBackground, cv::MorphTypes::MORPH_CLOSE, structuringElement);
 
         // need to use floating point Mat for division
+        Mat tmp;
         if (blackOnWhite.depth() == CV_8U) {
-            unnormalised = invert(eightBitToFloat(blackOnWhite) / eightBitToFloat(lightBackground));
+            cv::divide(eightBitToFloat(blackOnWhite), eightBitToFloat(lightBackground), tmp);
         } else {
-            unnormalised = invert(blackOnWhite / lightBackground);
+            cv::divide(blackOnWhite, lightBackground, tmp);
         }
+        unnormalised = invert(tmp);
     } else {
         Mat darkBackground;
         cv::morphologyEx(whiteOnBlack, darkBackground, cv::MorphTypes::MORPH_OPEN, structuringElement);
-        unnormalised = whiteOnBlack - darkBackground;
+        cv::subtract(whiteOnBlack, darkBackground, unnormalised);
     }
     // output bitness is same as input
     auto outDepth = whiteOnBlack.depth();

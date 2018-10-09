@@ -96,7 +96,7 @@ Mat eightBitToFloat(const Mat& input, bool rescale, bool doublePrecision) {
 }
 
 Mat floatToEightBit(const Mat& input, bool rescale) {
-    if (input.depth() != CV_32F || input.depth() != CV_32F) {
+    if (input.depth() != CV_32F && input.depth() != CV_64F) {
         throw std::invalid_argument("Mat is not CV_32F or CV_64F");
     }
     Mat ret;
@@ -126,17 +126,21 @@ bool isWhiteTextOnBlack(const Mat& m) {
     if (m.depth() != CV_8U) {
         throw std::invalid_argument("matrix must be CV_8U");
     }
-    Mat dumbThreshold;
-    cv::equalizeHist(m, dumbThreshold);
-    cv::medianBlur(dumbThreshold, dumbThreshold, 11);
+    Mat equalized;
+    cv::equalizeHist(m, equalized);
     //showImage(dumbThreshold);
 
-    //cv::threshold(dumbThreshold, dumbThreshold, 0, 255, cv::THRESH_OTSU);
-    cv::adaptiveThreshold(dumbThreshold, dumbThreshold, 255, CV_ADAPTIVE_THRESH_MEAN_C, CV_THRESH_BINARY, 399, 0);
+    Mat blurred;
+    cv::medianBlur(equalized, blurred, 11);
+
+
+    Mat thresholded;
+    //cv::threshold(thresholded, thresholded, 0, 255, cv::THRESH_OTSU);
+    cv::adaptiveThreshold(blurred, thresholded, 255, CV_ADAPTIVE_THRESH_MEAN_C, CV_THRESH_BINARY, 399, 0);
 
     //showImage(dumbThreshold);
     // if nonzero pixels make up less than half the area of the image, it's probably white on black text
-    return cv::countNonZero(dumbThreshold) < m.rows * m.cols / 2;
+    return cv::countNonZero(thresholded) < m.rows * m.cols / 2;
 }
 
 int saveImage(const Mat &img, const char *outFile) {

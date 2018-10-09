@@ -9,10 +9,12 @@
 
 #include <opencv2/plot.hpp>
 
-using Plot = cv::plot::Plot2d;
 
-cv::Ptr<Plot>
+cv::Ptr<cv::plot::Plot2d>
 makePlot(const cv::Mat &data, const cv::Mat *resize = nullptr, cv::Scalar colour = cv::Scalar(0, 255, 255), int thickness = 7);
+
+cv::Ptr<cv::plot::Plot2d>
+makePlot(const cv::Mat &data, cv::Scalar colour = cv::Scalar(0, 255, 255), int thickness = 7, int resizeW=-1, int resizeH=-1);
 
 #endif // REFERENCE_ANDROID
 

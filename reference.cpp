@@ -48,8 +48,12 @@ static int centroidClusterBandwidth(int w, int h) {
 
 
 //const int MIN_CC_AREA = 80;
+// note that the area of a CC is given by its white pixels, not the area of its bounding box
 static int minCCArea(int w, int h) {
     return std::max(10, w*h/37500);
+}
+static int minCCBoxArea(int w, int h) {
+    return 200;
 }
 
 // Returns whether x is in the closed interval [a, b]
@@ -73,17 +77,18 @@ const int MAX_COMBINED_RECT_HEIGHT = 1500/4;
 const int MIN_COMBINED_RECT_WIDTH = 2000/200;
 const int MAX_COMBINED_RECT_WIDTH = 2000/4;
  */
-const double MAX_CC_ASPECT_RATIO = 10;
+const double MAX_CC_ASPECT_RATIO = 9;
 const double MIN_CC_ASPECT_RATIO = 0.05;
-const double MAX_RECT_ASPECT_RATIO = 10;
-const double MIN_RECT_ASPECT_RATIO = 0.2;
+const double MAX_RECT_ASPECT_RATIO = 20;
+const double MIN_RECT_ASPECT_RATIO = 0.05;
 
 /*
  * Connected component and combined CC / wordBB size
  */
 static bool isPlausibleCCSize(const CComponent& c, int imgW, int imgH) {
     return c.area >= minCCArea(imgW, imgH) &&
-        inInterval(c.aspectRatio, MIN_CC_ASPECT_RATIO, MAX_CC_ASPECT_RATIO);
+           c.width*c.height >= minCCBoxArea(imgW, imgH) &&
+         inInterval(c.aspectRatio, MIN_CC_ASPECT_RATIO, MAX_CC_ASPECT_RATIO);
 }
 
 static bool isPlausibleWordBBSize(const wordBB& w, int imgW, int imgH) {
@@ -91,12 +96,12 @@ static bool isPlausibleWordBBSize(const wordBB& w, int imgW, int imgH) {
     int wordArea = w.getArea();
     int wordW = w.width;
     int wordH = w.height;
-    int minArea = imageArea/3000;
+    int minArea = 0; //imageArea/3000;
     int maxArea = imageArea/4;
     int minHeight = imgH/150;
     int maxHeight = imgH/4;
-    int minWidth = imgW/200;
-    int maxWidth = imgW/2;
+    int minWidth = 0; //imgW/200;
+    int maxWidth = imgW;
     double ratio = aspectRatio(wordW, wordH);
 
     return inInterval(wordW, minWidth, maxWidth)
@@ -110,13 +115,39 @@ static bool isPlausibleWordBBSize(const wordBB& w, int imgW, int imgH) {
  */
 static Mat preprocess(const Mat&, bool);
 static vector<vector<wordBB>> findWords(const Mat&, bool);
+static int estimateNumberOfColumns(const vector<wordBB>& wordBBs, int width, const Mat& rects, bool batchMode);
 static void classifyColumns(std::vector<wordBB>&, int, int, bool batchMode=true);
 static void doOcr(const Mat&, tesseract::TessBaseAPI&, vector<wordBB>&);
 static Table createTable(const vector<wordBB>&, int);
 
 
 Table tableExtract(const Mat &image, tesseract::TessBaseAPI& tesseractAPI, cv::Mat * wordBBImg, bool batchMode) {
-    Mat binarised = preprocess(image, batchMode);
+
+    Mat grey;
+#ifdef REFERENCE_ANDROID
+    // android images are RGBA after decoding
+    cv::cvtColor(image, grey, CV_RGBA2GRAY);
+#else
+    grey = image;
+#endif
+    Mat grey8;
+    grey.convertTo(grey8, CV_8UC1);
+
+    Mat preprocessed = preprocess(grey8, batchMode);
+    Mat binarised;
+    {
+        // gaussian blur
+        Mat preprocessedF = eightBitToFloat(preprocessed);
+        Mat blurredF;
+        cv::GaussianBlur(preprocessedF, blurredF, cv::Size(5, 5), 0);
+        Mat blurred = floatToEightBit(blurredF);
+        //cv::threshold(blurred, binarised, 0, 255, cv::THRESH_BINARY | cv::THRESH_OTSU);
+        cv::threshold(preprocessed, binarised, 0, 255, cv::THRESH_BINARY | cv::THRESH_OTSU);
+        if (!batchMode) {
+            showImage(binarised, "binarised");
+        }
+    }
+
     vector<vector<wordBB>> wordsByRow = findWords(binarised, batchMode);
 
     Mat rects = overlayWords(binarised, wordsByRow, false);
@@ -178,107 +209,7 @@ Table tableExtract(const Mat &image, tesseract::TessBaseAPI& tesseractAPI, cv::M
         }
     }
 
-
-    // this will count how many rects (from eligible rows) would be intersected by a cut at the given X coordinate
-    //int * rectsCutByXCount = new int[image.cols];
-    Mat rectsCutByXCount64F(image.cols, 1, CV_64FC1, cv::Scalar(0));
-    // need 8UC1 for median blur
-    Mat rectsCutByXCount(image.cols, 1, CV_8UC1, cv::Scalar(0));
-    for (auto &wordBB : wordBBsforColumnInference) {
-        for (int j = wordBB.x; j < wordBB.x + wordBB.width; ++j) {
-            rectsCutByXCount64F.at<double>(j) += 1.0;
-            rectsCutByXCount.at<unsigned char>(j) += 1;
-        }
-    }
-
-    Mat smoothedRectCutDensity;
-    // try to remove 'low frequency' component
-    Mat extraSmoothedRectCutDensity;
-
-    {
-        // have to make blur size odd
-        auto width = image.cols;
-        auto blurSize = width/16 + ((width/16) % 2 == 0);
-        auto extraBlurSize = width - (width % 2 == 0);
-        // treat 'outside the image' as zero
-        cv::GaussianBlur(rectsCutByXCount64F, smoothedRectCutDensity, cv::Size(blurSize, blurSize), 0, 0, cv::BORDER_ISOLATED);
-        cv::GaussianBlur(rectsCutByXCount64F, extraSmoothedRectCutDensity, cv::Size(extraBlurSize, extraBlurSize), 0, 0, cv::BORDER_ISOLATED);
-        //cv::normalize(smoothedRectCutDensity)
-
-#ifndef REFERENCE_ANDROID
-        if (!batchMode) {
-            cv::Ptr<Plot> plotCounts = makePlot(rectsCutByXCount64F, &image);
-            cv::Ptr<Plot> plotSmoothedCounts = makePlot(smoothedRectCutDensity, &image);
-            cv::Ptr<Plot> plotExtraSmoothedCounts = makePlot(extraSmoothedRectCutDensity, &image);
-            Mat plotResultCounts;
-            Mat plotResultSmoothedCounts;
-            Mat plotResultExtraSmoothedCounts;
-            plotCounts->render(plotResultCounts);
-            plotSmoothedCounts->render(plotResultSmoothedCounts);
-            plotExtraSmoothedCounts->render(plotResultExtraSmoothedCounts);
-
-            showImage(0.5 * plotResultCounts + 0.5 * rects);
-            showImage(0.5 * plotResultSmoothedCounts + 0.5 * rects);
-            showImage(0.3 * plotResultSmoothedCounts + 0.3*plotResultExtraSmoothedCounts + 0.4 * rects);
-        }
-#endif // REFERENCE_ANDROID
-    }
-
-    unsigned int estimatedColumns;
-
-    // count number of peaks by sign counting, where the sign is taken relative to a threshold (3rd quartile?)
-    // TODO findpeaks needs improvement
-    {
-        Mat m0;
-        cv::sort(smoothedRectCutDensity, m0, cv::SORT_ASCENDING | cv::SORT_EVERY_COLUMN);
-        int n = smoothedRectCutDensity.rows;
-        // 75th percentile
-        auto q75 = m0.at<double>(n * 3 / 4);
-        // 60th percentile
-        auto q60 = m0.at<double>(n * 3 / 5);
-        // count peaks by seeing when the smoothedRectCutDensity crosses the threshold
-        unsigned int peaks = 0;
-        bool inPeak = false;
-        for (int i = 1; i < n; ++i) {
-            auto x = smoothedRectCutDensity.at<double>(i);
-            if (x >= q75) {
-                // it's a peak
-                if (!inPeak) {
-                    peaks++;
-                }
-                inPeak = true;
-            } else if (x <= q60) {
-                // it's not a peak
-                inPeak = false;
-            }
-        }
-        estimatedColumns = peaks;
-        if (!batchMode) {
-            printf("Estimated columns by sign counting: %u\n", estimatedColumns);
-        }
-#ifndef REFERENCE_ANDROID
-        if (!batchMode) {
-            cv::Ptr<Plot> plotThreshold = makePlot(smoothedRectCutDensity, &image);
-            Mat plotResultThresh;
-            {
-                plotThreshold->render(plotResultThresh);
-                // draw q3 as a line on the image
-                // need to calculate its y coordinate, given that the plot's original height was equal to
-                // max(smoothedCutRectDensity), but was rescaled to have height equal to the original image
-                double maxVal;
-                cv::minMaxIdx(smoothedRectCutDensity, nullptr, &maxVal);
-                // subtract from 1.0 to get threshold referred to bottom of image, not top
-                auto q75YCoord = static_cast<int>((1.0 - q75 / maxVal) * plotResultThresh.rows);
-                auto q60YCoord = static_cast<int>((1.0 - q60 / maxVal) * plotResultThresh.rows);
-                auto red = cv::Scalar(0, 0, 255); // B, G, R
-                cv::rectangle(plotResultThresh, cv::Rect(0, q75YCoord, plotResultThresh.cols - 1, 1), red, 5);
-                cv::rectangle(plotResultThresh, cv::Rect(0, q60YCoord, plotResultThresh.cols - 1, 1), red, 5);
-            }
-            showImage(0.5 * plotResultThresh + 0.5 * rects);
-        }
-#endif // REFERENCE_ANDROID
-    }
-
+    int estimatedColumns = estimateNumberOfColumns(wordBBsforColumnInference, image.cols, rects, batchMode);
     classifyColumns(allWordBBs, estimatedColumns, image.cols, batchMode);
 
     // sort the wordBBs by row, then by column, then by x coordinate
@@ -294,7 +225,8 @@ Table tableExtract(const Mat &image, tesseract::TessBaseAPI& tesseractAPI, cv::M
         *wordBBImg = overlayWords(binarised, allWordBBs, true);
     }
 
-    doOcr(binarised, tesseractAPI, allWordBBs);
+    // TODO combine wordBBs in the same column
+    doOcr(preprocessed, tesseractAPI, allWordBBs);
 
     Table t = createTable(allWordBBs, estimatedColumns);
 
@@ -386,61 +318,23 @@ static void classifyColumns(vector<wordBB>& words, int numColumns, int imageWidt
 }
 
 
-static cv::Mat preprocess(const cv::Mat& image, bool batchMode) {
+static cv::Mat preprocess(const cv::Mat& grey8, bool batchMode) {
     using cv::Mat;
-
-    Mat grey;
-#ifdef REFERENCE_ANDROID
-    // android images are RGBA after decoding
-    cv::cvtColor(image, grey, CV_RGBA2GRAY);
-#else
-    grey = image;
-#endif
-    Mat grey8;
-    grey.convertTo(grey8, CV_8UC1);
 
     // do dumb threshold to figure out whether it's white on black or black on white text, and invert if necessary
     Mat whiteOnBlack = isWhiteTextOnBlack(grey8) ? grey8 : invert(grey8);
-    Mat whiteOnBlackF = eightBitToFloat(whiteOnBlack, false);
 
-    Mat textEnhanced;
-    Mat textEnhancedSub;
-    Mat textEnhancedSubF;
-    Mat textEnhancedDiv;
-    Mat textEnhancedDivF;
-    for (int div = 5; div < 100; div += 5) {
-        const auto openingKsize = std::max(whiteOnBlack.rows, whiteOnBlack.cols)/div;
-        const Mat sElement = structuringElement(openingKsize, cv::MORPH_RECT);
-        textEnhancedSub = textEnhance(whiteOnBlack, sElement, false);
-        textEnhancedSubF = textEnhance(whiteOnBlackF, sElement, false);
-        textEnhancedDiv = textEnhance(whiteOnBlack, sElement,  true);
-        textEnhancedDivF = textEnhance(whiteOnBlackF, sElement, true);
-        std::string subTitle = "textEnhancedSub, div = ";
-        std::string subFTitle = "textEnhancedSubF, div = ";
-        std::string divTitle = "textEnhancedDiv, div = ";
-        std::string divFTitle = "textEnhancedDivF, div = ";
-        subTitle.append(std::to_string(div));
-        subFTitle.append(std::to_string(div));
-        divTitle.append(std::to_string(div));
-        divFTitle.append(std::to_string(div));
-        if (!batchMode) {
-            showImage(textEnhancedSub, subTitle);
-            showImage(textEnhancedSubF, subFTitle);
-            showImage(textEnhancedDiv, divTitle);
-            showImage(textEnhancedDivF, divFTitle);
-        }
-    }
+    const auto openingKsize = std::max(whiteOnBlack.rows, whiteOnBlack.cols)/30;
+    const Mat sElement = structuringElement(openingKsize, cv::MORPH_RECT);
+    Mat textEnhanced = textEnhance(whiteOnBlack, sElement, false);
 
-
-    Mat preprocessed;
-    return preprocessed;
 
     Mat vLines;
     Mat hLines;
-    // remove large horizontal and vertical lines
-    // use black hat instead of top hat since it's black on white
-    cv::morphologyEx(preprocessed, hLines, cv::MorphTypes::MORPH_OPEN, structuringElement(250, 5, cv::MORPH_RECT));
-    cv::morphologyEx(preprocessed, vLines, cv::MorphTypes::MORPH_OPEN, structuringElement(5, 250, cv::MORPH_RECT));
+    // detect large horizontal and vertical lines
+    cv::morphologyEx(textEnhanced, hLines, cv::MorphTypes::MORPH_OPEN, structuringElement(250, 5, cv::MORPH_RECT));
+    cv::morphologyEx(textEnhanced, vLines, cv::MorphTypes::MORPH_OPEN, structuringElement(5, 250, cv::MORPH_RECT));
+
     //Mat opened;
     //cv::morphologyEx(linesRemoved, opened, cv::MorphTypes::MORPH_OPEN, structuringElement(12, 12, cv::MORPH_ELLIPSE));
 
@@ -449,53 +343,30 @@ static cv::Mat preprocess(const cv::Mat& image, bool batchMode) {
     // don't use the binarised (or blurred) image for OCR (don't throw away)
     // histogram of gradients
 
-    if (!batchMode) {
-        showImage(image, "image");
-        //showImage(preprocessed, "preprocessed");
-        showImage(vLines, "vlines");
-        showImage(hLines, "hlines");
-    }
-
-    /*
-    morphologyEx(255-linesRemoved, textEnhanced, cv::MorphTypes::MORPH_TOPHAT, sElement);
-    cv::normalize(textEnhanced, textEnhanced, 0, 255, cv::NORM_MINMAX);
-
-    cv::Mat closed;
-    morphologyEx(linesRemoved, closed, cv::MorphTypes::MORPH_CLOSE, sElement);
-    cv::Mat closedF;
-    cv::Mat linesF;
-    closed.convertTo(closedF, CV_64FC1, 1.0/255);
-    linesRemoved.convertTo(linesF, CV_64FC1, 1.0/255);
-    cv::Mat dividedF = linesF.mul(closedF);
-    cv::normalize(dividedF, dividedF, 0, 1, cv::NORM_MINMAX);
-    cv::Mat divided;
-    dividedF.convertTo(divided, CV_8UC1, 255);
-    if (!batchMode) {
-        showImage(closed);
-        showImage(divided);
-    }
-     */
-
-    textEnhanced = preprocessed;
-
-
     //clean it up a bit?
     // shapes: MORPH_RECT, MORPH_CROSS, MORPH_ELLIPSE
     //cv::morphologyEx(preprocessed, preprocessed, cv::MorphTypes::MORPH_ERODE, structuringElement(2, cv::MORPH_ELLIPSE));
     //cv::morphologyEx(preprocessed, preprocessed, cv::MorphTypes::MORPH_OPEN, structuringElement(1, 7, cv::MORPH_RECT));
 
-    Mat binarised;
     //int C = 0; // constant subtracted from calculated threshold value to obtain T(x, y)
     //cv::adaptiveThreshold(open, binarised, 255, CV_ADAPTIVE_THRESH_MEAN_C, CV_THRESH_BINARY, 399, C);
     //cv::morphologyEx(binarised, binarised, cv::MorphTypes::MORPH_OPEN, structuringElement(2, cv::MORPH_ELLIPSE));
-    cv::threshold(textEnhanced, binarised, 0, 255, cv::THRESH_OTSU);
+    //cv::threshold(hLines, hLinesBin, 0, 255, cv::THRESH_TOZERO | cv::THRESH_OTSU);
+    //cv::threshold(vLines, vLinesBin, 0, 255, cv::THRESH_TOZERO | cv::THRESH_OTSU);
 
+    // remove lines
+    Mat preprocessed;
+    cv::subtract(textEnhanced, hLines, preprocessed, cv::noArray(), CV_8U);
+    cv::subtract(preprocessed, vLines, preprocessed, cv::noArray(), CV_8U);
     if (!batchMode) {
-        showImage(textEnhanced, "text enhanced");
-        showImage(binarised, "binarised");
+        showImage(grey8, "image");
+        showImage(textEnhanced, "textEnhanced");
+        //showImage(hLines, "hlines");
+        //showImage(vLines, "vlines");
+        showImage(preprocessed, "preprocessed");
     }
 
-    return binarised;
+    return preprocessed;
 
 }
 
@@ -531,7 +402,7 @@ vector<vector<wordBB>> findWords(const Mat &binarised, bool batchMode) {
     }
 
     vector<meanShift::Point<CComponent>> yCentroids;
-    for (CComponent &cc: allCCs) {
+    for (const CComponent &cc: allCCs) {
         if (isPlausibleCCSize(cc, binarised.cols, binarised.rows)) {
             //yCentroids.push_back(meanShift::Point {i, {centroidY}});
             // include height and width in clustering decision
@@ -541,12 +412,18 @@ vector<vector<wordBB>> findWords(const Mat &binarised, bool batchMode) {
     }
     if (!batchMode) {
         Mat allComponents = binarised.clone();
-        for (CComponent &cc: allCCs) {
-            if (cc.area >= minCCArea(binarised.cols, binarised.rows)) {
+        Mat allowedComponents = binarised.clone();
+        for (const CComponent &cc: allCCs) {
+            if (isPlausibleCCSize(cc, binarised.cols, binarised.rows)) {
+                drawCC(allComponents, cc);
+                drawCC(allowedComponents, cc);
+            }
+            else if (cc.area >= minCCArea(binarised.cols, binarised.rows)) {
                 drawCC(allComponents, cc);
             }
         }
-        showImage(allComponents);
+        showImage(allComponents, "all CCs");
+        showImage(allowedComponents, "plausible CCs");
     }
 
     // TODO justify bandwidth parameter
@@ -600,7 +477,9 @@ vector<vector<wordBB>> findWords(const Mat &binarised, bool batchMode) {
         clustersByCentroid.push_back(heightClusters[0]);
     }
 
-    //showCentroidClusters(binarised, clustersByCentroid);
+    if (!batchMode) {
+        showCentroidClusters(binarised, clustersByCentroid);
+    }
     //showRowBounds(binarised, clustersByCentroid);
 
     /*
@@ -614,13 +493,16 @@ vector<vector<wordBB>> findWords(const Mat &binarised, bool batchMode) {
 
     // make 'rows' of 'words'
     vector<vector<wordBB>> rows;
+    // TODO maybe just cluster by width and X centroid?
+    // TODO or estimate columns first, based on the raw connected components
     for (ccCluster &c: clustersByCentroid) {
         vector<vector<Interval>> closeCCsInCluster;
         vector<Interval> intervals;
         for (CComponent cc : c.getData()) {
             intervals.emplace_back(Interval(cc.label, (double)cc.left, (double) cc.left + cc.width));
         }
-        Interval::groupCloseIntervals(intervals, closeCCsInCluster, 2.0);
+        // TODO group if they are closer than 1.5* median character width
+        Interval::groupCloseIntervals(intervals, closeCCsInCluster, 1.5, Interval::ExpandType::AVG);
         // TODO prevent them from getting too big?
         // TODO also make sure that they overlap vertically
 
@@ -679,3 +561,91 @@ static Table createTable(const vector<wordBB>& allWordBBs, int estimatedColumns)
     return t;
 }
 
+static int estimateNumberOfColumns(const vector<wordBB>& wordBBs, int width, const Mat& rects, bool batchMode) {
+    // this will count how many rects (from eligible rows) would be intersected by a cut at the given X coordinate
+    Mat rectsCutByXCoord(width, 1, CV_64FC1, cv::Scalar(0));
+    for (const auto & word: wordBBs) {
+        for (int j = word.x; j < word.x + word.width; ++j) {
+            rectsCutByXCoord.at<double>(j) += 1.0;
+        }
+    }
+
+    Mat rectCutDensity;
+    {
+        // have to make blur size odd
+        auto blurSize = width/8 + ((width/8) % 2 == 0);
+        // treat 'outside the image' as zero
+        cv::GaussianBlur(rectsCutByXCoord, rectCutDensity, cv::Size(blurSize, blurSize), 0, 0, cv::BORDER_ISOLATED);
+
+#ifndef REFERENCE_ANDROID
+        using cv::plot::Plot2d;
+        if (!batchMode) {
+            cv::Ptr<Plot2d> plotCounts = makePlot(rectsCutByXCoord, &rects);
+            cv::Ptr<Plot2d> plotSmoothedCounts = makePlot(rectCutDensity, &rects);
+            Mat plotResultCounts;
+            Mat plotResultSmoothedCounts;
+            plotCounts->render(plotResultCounts);
+            plotSmoothedCounts->render(plotResultSmoothedCounts);
+            showImage(0.5 * plotResultCounts + 0.5 * rects);
+            showImage(0.5 * plotResultSmoothedCounts + 0.5 * rects);
+        }
+#endif // REFERENCE_ANDROID
+    }
+
+    unsigned int estimatedColumns;
+
+    // count number of peaks by sign counting, where the sign is taken relative to a threshold (3rd quartile?)
+    // TODO findpeaks needs improvement
+    {
+        Mat m0;
+        cv::sort(rectCutDensity, m0, cv::SORT_ASCENDING | cv::SORT_EVERY_COLUMN);
+        int n = rectCutDensity.rows;
+        // 75th percentile
+        auto q75 = m0.at<double>(n * 3 / 4);
+        // 60th percentile
+        auto q60 = m0.at<double>(n * 3 / 5);
+        // count peaks by seeing when the rectCutDensity crosses the threshold
+        unsigned int peaks = 0;
+        bool inPeak = false;
+        for (int i = 1; i < n; ++i) {
+            auto x = rectCutDensity.at<double>(i);
+            if (x >= q75) {
+                // it's a peak
+                if (!inPeak) {
+                    peaks++;
+                }
+                inPeak = true;
+            } else if (x <= q60) {
+                // it's not a peak
+                inPeak = false;
+            }
+        }
+        estimatedColumns = peaks;
+        if (!batchMode) {
+            printf("Estimated columns by sign counting: %u\n", estimatedColumns);
+        }
+#ifndef REFERENCE_ANDROID
+        using cv::plot::Plot2d;
+        if (!batchMode) {
+            cv::Ptr<Plot2d> plotThreshold = makePlot(rectCutDensity, &rects);
+            Mat plotResultThresh;
+            {
+                plotThreshold->render(plotResultThresh);
+                // draw q3 as a line on the image
+                // need to calculate its y coordinate, given that the plot's original height was equal to
+                // max(smoothedCutRectDensity), but was rescaled to have height equal to the original image
+                double maxVal;
+                cv::minMaxIdx(rectCutDensity, nullptr, &maxVal);
+                // subtract from 1.0 to get threshold referred to bottom of image, not top
+                auto q75YCoord = static_cast<int>((1.0 - q75 / maxVal) * plotResultThresh.rows);
+                auto q60YCoord = static_cast<int>((1.0 - q60 / maxVal) * plotResultThresh.rows);
+                auto red = cv::Scalar(0, 0, 255); // B, G, R
+                cv::rectangle(plotResultThresh, cv::Rect(0, q75YCoord, plotResultThresh.cols - 1, 1), red, 5);
+                cv::rectangle(plotResultThresh, cv::Rect(0, q60YCoord, plotResultThresh.cols - 1, 1), red, 5);
+            }
+            showImage(0.5 * plotResultThresh + 0.5 * rects);
+        }
+#endif // REFERENCE_ANDROID
+    }
+    return estimatedColumns;
+}

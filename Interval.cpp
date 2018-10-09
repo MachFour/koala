@@ -6,8 +6,11 @@
 
 #include <vector>
 #include <algorithm>
+#include <cmath>
 
 using std::vector;
+using std::fmax;
+using std::fmin;
 
 bool Interval::areClose(const Interval &i1, const Interval &i2, double expand, ExpandType method) {
     double dist = distance(i1.midpoint, i2.midpoint);
@@ -25,18 +28,15 @@ bool Interval::areClose(const Interval &i1, const Interval &i2, double expand, E
 }
 
 bool Interval::closeToAny(const Interval &one, const vector<Interval> &others, double expand, ExpandType method) {
-    bool close = false;
     for (const Interval& other : others) {
-        close |= areClose(one, other, expand, method);
-        if (close) {
-            // don't need to check others
-            break;
+        if (areClose(one, other, expand, method)) {
+            return true;
         }
     }
-    return close;
+    return false;
 }
 
-void Interval::groupCloseIntervals(vector<Interval> intervals, vector<vector<Interval>> &partitions, double expansion) {
+void Interval::groupCloseIntervals(vector<Interval> intervals, vector<vector<Interval>> &partitions, double expansion, ExpandType method) {
     partitions.clear();
 
     // sort intervals by left edge, this way we can find overlapping intervals in one pass
@@ -52,7 +52,7 @@ void Interval::groupCloseIntervals(vector<Interval> intervals, vector<vector<Int
         currentPartition.push_back(intervals[i]);
         // find how many subsequent intervals overlap
         // make sure not to skip over the i+1ths interval if it doesn't overlap
-        for (; i+1 < intervals.size() && closeToAny(intervals[i + 1], currentPartition, expansion, MIN); ++i) {
+        for (; i+1 < intervals.size() && closeToAny(intervals[i + 1], currentPartition, expansion, method); ++i) {
             // TODO could interval i+1 be close to a previous interval in the current partition but not interval i?
             currentPartition.push_back(intervals[i+1]);
         }

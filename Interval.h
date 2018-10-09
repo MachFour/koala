@@ -27,10 +27,9 @@ public:
 
 
     // intervals vector needs to be copied because it's sorted
-    static void groupCloseIntervals(std::vector<Interval>, std::vector<std::vector<Interval>>&, double);
+    static void groupCloseIntervals(std::vector<Interval>, std::vector<std::vector<Interval>>&, double, ExpandType method = AVG);
     static bool areClose(const Interval&, const Interval&, double expand = 1.0, ExpandType method = AVG);
-    static bool closeToAny(const Interval&, const std::vector<Interval>& others, double expand = 1.0,
-            ExpandType method = AVG);
+    static bool closeToAny(const Interval&, const std::vector<Interval>& others, double expand = 1.0, ExpandType method = AVG);
 
 private:
     int label;
