@@ -118,8 +118,6 @@ static vector<vector<wordBB>> findWords(const Mat&, bool);
 static int estimateNumberOfColumns(const vector<wordBB>& wordBBs, int width, const Mat& rects, bool batchMode);
 static void classifyColumns(std::vector<wordBB>&, int, int, bool batchMode=true);
 static void doOcr(const Mat&, tesseract::TessBaseAPI&, vector<wordBB>&);
-static Table createTable(const vector<wordBB>&, int);
-
 
 Table tableExtract(const Mat &image, tesseract::TessBaseAPI& tesseractAPI, cv::Mat * wordBBImg, bool batchMode) {
 
@@ -225,7 +223,6 @@ Table tableExtract(const Mat &image, tesseract::TessBaseAPI& tesseractAPI, cv::M
         return std::lexicographical_compare(aCoords.begin(), aCoords.end(), bCoords.begin(), bCoords.end());
     });
 
-    // TODO combine wordBBs in the same column
     vector<wordBB> combinedWordBBs;
     {
         vector<wordBB> wordsInCurrentCell;
@@ -238,6 +235,8 @@ Table tableExtract(const Mat &image, tesseract::TessBaseAPI& tesseractAPI, cv::M
                     firstWord = false;
                 } else {
                     auto combined = combineWordBBs(wordsInCurrentCell, image.cols, image.rows);
+                    combined.expandMinOf(10, 20);
+                    combined.constrain(0, 0, image.cols, image.rows);
                     combined.setCol(currentColumn);
                     combined.setRow(currentRow);
                     combinedWordBBs.push_back(combined);
@@ -265,7 +264,11 @@ Table tableExtract(const Mat &image, tesseract::TessBaseAPI& tesseractAPI, cv::M
     // run OCR on the preprocessed image
     doOcr(invert(preprocessed), tesseractAPI, combinedWordBBs);
 
-    Table t = createTable(combinedWordBBs, estimatedColumns);
+    Table t(estimatedColumns);
+    // now we can assume there is only one wordBB per row and column
+    for (const wordBB &w : combinedWordBBs) {
+        t.setColumnText(w.row(), w.col(), w.text);
+    }
 
     // TODO Contour / line detection
     //showImage(binarised);
@@ -570,39 +573,14 @@ static void doOcr(const Mat& imageForOcr, tesseract::TessBaseAPI& tesseractAPI, 
     tesseractAPI.SetSourceResolution(300);
 
     for (wordBB &w : allWordBBs) {
-        //Mat tessImage;
-        //w.text = getCleanedText(tesseractAPI, w, tessImage);
-        //showImage(tessImage, "OCR for wordBB");
+        /*
+        Mat tessImage;
+        w.text = getCleanedText(tesseractAPI, w, tessImage);
+        showImage(tessImage, "OCR for wordBB");
+        /*/
         w.text = getCleanedText(tesseractAPI, w);
+        /**/
     }
-}
-
-
-static Table createTable(const vector<wordBB>& allWordBBs, int estimatedColumns) {
-    // create table;
-    Table t(estimatedColumns);
-    bool firstWord = true;
-    int currentRow = 0;
-    int currentColumn = 0;
-    std::string cellText;
-    for (const wordBB &w : allWordBBs) {
-        if (w.row() != currentRow || w.col() != currentColumn || firstWord) {
-            if (firstWord) {
-                firstWord = false;
-            } else {
-                // set old cell
-                t.setColumnText(currentRow, currentColumn, cellText);
-            }
-            // start new cell;
-            cellText = std::string(w.text);
-            currentRow = w.row();
-            currentColumn = w.col();
-        } else {
-            cellText.append(" ");
-            cellText.append(w.text);
-        }
-    }
-    return t;
 }
 
 static int estimateNumberOfColumns(const vector<wordBB>& wordBBs, int width, const Mat& rects, bool batchMode) {

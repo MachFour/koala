@@ -14,7 +14,8 @@
  * Has fields to facilitate clustering into rows and columns
  */
 
-struct wordBB {
+class wordBB {
+public:
     int x;
     int y;
     int width;
@@ -27,6 +28,29 @@ struct wordBB {
         x(x), y(y), width(width), height(height), text(""),
         _row(0), _col(0), rowAssigned(false), colAssigned(false) {};
 
+    void expandMinOf(int pixels, int percent) {
+        auto expandW = std::min(pixels, (int)std::round(percent/100.0 * width));
+        auto expandH = std::min(pixels, (int)std::round(percent/100.0 * height));
+        // XXX this may lead to sometimes each dimension getting expanded by the same amount,
+        // sometimes different
+
+        x -= expandW / 2;
+        width += expandW;
+        y -= expandH / 2;
+        height += expandH;
+    }
+
+    void constrain(int minX, int minY, int maxX, int maxY) {
+        auto newX = std::max(x, minX);
+        auto newY = std::max(y, minY);
+        auto newRight = std::min(x + width, maxX);
+        auto newBottom = std::min(y + height, maxY);
+
+        x = newX;
+        y = newY;
+        width = newRight - newX;
+        height = newBottom - newY;
+    }
 
     int row() const {
         return _row;
