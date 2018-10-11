@@ -53,7 +53,7 @@ static int minCCArea(int w, int h) {
     return std::max(10, w*h/37500);
 }
 static int minCCBoxArea(int w, int h) {
-    return 200;
+    return 2*minCCArea(w, h);
 }
 
 // Returns whether x is in the closed interval [a, b]
@@ -176,13 +176,18 @@ Table tableExtract(const Mat &image, tesseract::TessBaseAPI& tesseractAPI, cv::M
                 rectsPerRow.push_back(s);
             }
         }
-        cv::sort(rectsPerRow, sortedRectsPerRow, CV_SORT_EVERY_COLUMN | CV_SORT_ASCENDING);
-        //cv::integral(sortedRectsPerRow, sumRectsPerRow, sumSqRectsPerRow, CV_32S, CV_64F);
-        auto n = rectsPerRow.size[0];
-        rectsPerRowQ1 = sortedRectsPerRow.at<unsigned char>(n / 4);
-        //rectsPerRowQ2 = sortedRectsPerRow.at<unsigned char>(n / 2);
-        //rectsPerRowQ3 = sortedRectsPerRow.at<unsigned char>(n * 3 / 4);
-        //rectsPerRowIQR = rectsPerRowQ3 - rectsPerRowQ1;
+        if (!rectsPerRow.empty()) {
+            cv::sort(rectsPerRow, sortedRectsPerRow, CV_SORT_EVERY_COLUMN | CV_SORT_ASCENDING);
+            //cv::integral(sortedRectsPerRow, sumRectsPerRow, sumSqRectsPerRow, CV_32S, CV_64F);
+            auto n = rectsPerRow.rows; // guaranteed n > 0
+            rectsPerRowQ1 = sortedRectsPerRow.at<unsigned char>(n / 4);
+            //rectsPerRowQ2 = sortedRectsPerRow.at<unsigned char>(n / 2);
+            //rectsPerRowQ3 = sortedRectsPerRow.at<unsigned char>(n * 3 / 4);
+            //rectsPerRowIQR = rectsPerRowQ3 - rectsPerRowQ1;
+        } else {
+            rectsPerRowQ1 = 0;
+            fprintf(stderr, "tableExtract(): no nonempty rows!!\n");
+        }
     }
 
     vector<wordBB> wordBBsforColumnInference;
@@ -220,15 +225,47 @@ Table tableExtract(const Mat &image, tesseract::TessBaseAPI& tesseractAPI, cv::M
         return std::lexicographical_compare(aCoords.begin(), aCoords.end(), bCoords.begin(), bCoords.end());
     });
 
-    // save intermediate processing result
-    if (wordBBImg != nullptr) {
-        *wordBBImg = overlayWords(binarised, allWordBBs, true);
+    // TODO combine wordBBs in the same column
+    vector<wordBB> combinedWordBBs;
+    {
+        vector<wordBB> wordsInCurrentCell;
+        bool firstWord = true;
+        int currentRow = 0;
+        int currentColumn = 0;
+        for (const wordBB &w : allWordBBs) {
+            if (w.row() != currentRow || w.col() != currentColumn || firstWord) {
+                if (firstWord) {
+                    firstWord = false;
+                } else {
+                    auto combined = combineWordBBs(wordsInCurrentCell, image.cols, image.rows);
+                    combined.setCol(currentColumn);
+                    combined.setRow(currentRow);
+                    combinedWordBBs.push_back(combined);
+                }
+                // start new cell;
+                wordsInCurrentCell.clear();
+                wordsInCurrentCell.push_back(w);
+                currentRow = w.row();
+                currentColumn = w.col();
+            } else {
+                wordsInCurrentCell.push_back(w);
+            }
+        }
     }
 
-    // TODO combine wordBBs in the same column
-    doOcr(preprocessed, tesseractAPI, allWordBBs);
+    Mat finalWordBBs = overlayWords(binarised, combinedWordBBs, true);
+    if (!batchMode) {
+        showImage(finalWordBBs, "combinedWordBBs");
+    }
+    if (wordBBImg != nullptr) {
+        // save intermediate processing result
+        *wordBBImg = finalWordBBs;
+    }
 
-    Table t = createTable(allWordBBs, estimatedColumns);
+    // run OCR on the preprocessed image
+    doOcr(invert(preprocessed), tesseractAPI, combinedWordBBs);
+
+    Table t = createTable(combinedWordBBs, estimatedColumns);
 
     // TODO Contour / line detection
     //showImage(binarised);
@@ -237,6 +274,10 @@ Table tableExtract(const Mat &image, tesseract::TessBaseAPI& tesseractAPI, cv::M
 
 static void classifyColumns(vector<wordBB>& words, int numColumns, int imageWidth, bool batchMode) {
     // now put horizontal centres of all wordBBs into a Mat and run kmeans
+    if (words.empty()) {
+        fprintf(stderr, "classifyColumns(): warning: words list was empty");
+        return;
+    }
     Mat wordBBcentroidX((int) words.size(), 1, CV_64FC1);
     for (unsigned int i = 0; i < words.size(); ++i) {
         const wordBB& w = words[i];
@@ -529,6 +570,9 @@ static void doOcr(const Mat& imageForOcr, tesseract::TessBaseAPI& tesseractAPI, 
     tesseractAPI.SetSourceResolution(300);
 
     for (wordBB &w : allWordBBs) {
+        //Mat tessImage;
+        //w.text = getCleanedText(tesseractAPI, w, tessImage);
+        //showImage(tessImage, "OCR for wordBB");
         w.text = getCleanedText(tesseractAPI, w);
     }
 }
@@ -607,7 +651,7 @@ static int estimateNumberOfColumns(const vector<wordBB>& wordBBs, int width, con
         // count peaks by seeing when the rectCutDensity crosses the threshold
         unsigned int peaks = 0;
         bool inPeak = false;
-        for (int i = 1; i < n; ++i) {
+        for (int i = 0; i < n; ++i) {
             auto x = rectCutDensity.at<double>(i);
             if (x >= q75) {
                 // it's a peak

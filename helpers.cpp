@@ -66,6 +66,25 @@ cv::Rect findBoundingRect(const vector<Interval>& intervals, const vector<CCompo
     return cv::Rect(minLeft, minTop, rectWidth, rectHeight);
 }
 
+// basically a copy of findBoundingRect but for WordBBs
+wordBB combineWordBBs(const std::vector<wordBB>& toCombine, int maxWidth, int maxHeight) {
+    auto minY = maxHeight; // initially >= anything inside image
+    auto minX = maxWidth;  // initially >= anything inside image
+    auto maxY = 0;         // initially <= anything inside image
+    auto maxX = 0;         // initially <= anything inside image
+    for (const auto& w : toCombine) {
+        minY = std::min(w.y, minY);
+        minX = std::min(w.x, minX);
+        maxY = std::max(w.y + w.height, maxY);
+        maxX = std::max(w.x + w.width, maxX);
+    }
+    // left(x), top(y), width, height
+    auto height = maxY - minY;
+    auto width = maxX - minX;
+
+    return wordBB(minX, minY, width, height);
+}
+
 
 int findMedian(vector<int> numbers) {
     auto n = numbers.size();
