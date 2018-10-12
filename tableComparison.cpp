@@ -101,7 +101,7 @@ comparisonResult compareTable(const Table& actual, const Table& expected) {
         for (decltype(E) expectedRowIdx = 0; expectedRowIdx < E; ++expectedRowIdx) {
             const auto& actualRow = actual.getRow(actualRowForExpRow[expectedRowIdx]);
             const auto& expectedRow = expected.getRow(expectedRowIdx);
-            keyColScores.push_back(levenshteinScore(actualRow[0], expectedRow[0]));
+            keyColScores.push_back(asymStringSimilarity(actualRow[0], expectedRow[0]));
 
             // find the average levenshtein distance, assuming that the value columns match up
             // if the actual and expected tables have a different number of columns,
@@ -119,7 +119,7 @@ comparisonResult compareTable(const Table& actual, const Table& expected) {
                  */
                 avgValueColScore = 0.0;
                 for (decltype(numValueColumns) j = 1; j < std::min(actual.numCols(), expected.numCols()) - 1; ++j) {
-                    avgValueColScore += levenshteinScore(actualRow[j], expectedRow[j]) / numValueColumns;
+                    avgValueColScore += asymStringSimilarity(actualRow[j], expectedRow[j]) / numValueColumns;
                 }
             }
             avgValueColScores.push_back(avgValueColScore);

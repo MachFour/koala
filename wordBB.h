@@ -16,47 +16,43 @@
 
 class wordBB {
 public:
-    int x;
-    int y;
+    int left;
+    int top;
     int width;
     int height;
     std::string text;
 
     explicit wordBB(const cv::Rect& r) : wordBB(r.x, r.y, r.width, r.height) {};
 
-    wordBB(int x, int y, int width, int height) :
-        x(x), y(y), width(width), height(height), text(""),
+    wordBB(int left, int top, int width, int height) :
+        left(left), top(top), width(width), height(height), text(""),
         _row(0), _col(0), rowAssigned(false), colAssigned(false) {};
 
-    void expandMinOf(int pixels, int percent) {
-        auto expandW = std::min(pixels, (int)std::round(percent/100.0 * width));
-        auto expandH = std::min(pixels, (int)std::round(percent/100.0 * height));
-        // XXX this may lead to sometimes each dimension getting expanded by the same amount,
-        // sometimes different
+    cv::Scalar getColour(bool useRowColumn=false) const;
 
-        x -= expandW / 2;
-        width += expandW;
-        y -= expandH / 2;
-        height += expandH;
-    }
+    /*
+     * Mutator methods
+     */
 
-    void constrain(int minX, int minY, int maxX, int maxY) {
-        auto newX = std::max(x, minX);
-        auto newY = std::max(y, minY);
-        auto newRight = std::min(x + width, maxX);
-        auto newBottom = std::min(y + height, maxY);
-
-        x = newX;
-        y = newY;
-        width = newRight - newX;
-        height = newBottom - newY;
-    }
+    // WARNING these use integer division so expandHeight(x); expandHeight(-x) may shift the thing by one pixel down, idk
+    void expandHeightPx(int px);
+    void expandWidthPx(int px);
+    void expandMinOf(int pixels, int percent);
+    void constrain(int cLeft, int cTop, int cRight, int cBottom);
 
     int row() const {
         return _row;
     }
     int col() const {
         return _col;
+    }
+
+    int right() const {
+        return left + width;
+    }
+
+    int bottom() const {
+        return top + height;
     }
 
     void setRow(int row) {
@@ -79,16 +75,9 @@ public:
     }
 
     cv::Rect asRect() const {
-        return cv::Rect(x, y, width, height);
+        return cv::Rect(left, top, width, height);
     }
 
-    cv::Scalar getColour(bool useColumn=false) const {
-        if (useColumn) {
-            return pseudoRandomColour(_col);
-        } else {
-            return pseudoRandomColour(x, y, width, height);
-        }
-    }
 private:
     int _row;
     int _col;

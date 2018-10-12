@@ -59,7 +59,7 @@ cv::Rect findBoundingRect(const vector<Interval>& intervals, const vector<CCompo
         maxBottom = std::max(top + height, maxBottom);
         maxRight = std::max(left + width, maxRight);
     }
-    // left(x), top(y), width, height
+    // left(left), top(top), width, height
     auto rectHeight = maxBottom - minTop;
     auto rectWidth = maxRight - minLeft;
 
@@ -73,12 +73,12 @@ wordBB combineWordBBs(const std::vector<wordBB>& toCombine, int maxWidth, int ma
     auto maxY = 0;         // initially <= anything inside image
     auto maxX = 0;         // initially <= anything inside image
     for (const auto& w : toCombine) {
-        minY = std::min(w.y, minY);
-        minX = std::min(w.x, minX);
-        maxY = std::max(w.y + w.height, maxY);
-        maxX = std::max(w.x + w.width, maxX);
+        minY = std::min(w.top, minY);
+        minX = std::min(w.left, minX);
+        maxY = std::max(w.top + w.height, maxY);
+        maxX = std::max(w.left + w.width, maxX);
     }
-    // left(x), top(y), width, height
+    // left(left), top(top), width, height
     auto height = maxY - minY;
     auto width = maxX - minX;
 
@@ -104,7 +104,7 @@ int findMedian(vector<int> numbers) {
     }
 }
 
-void showCentroidClusters(const Mat& image, const vector<ccCluster>& clustersByCentroid) {
+void showCentroidClusters(const Mat& image, const vector<ccCluster>& clustersByCentroid, const std::string& title) {
     // now draw on the clustered CCs
     Mat clusteredCCs;
     cv::cvtColor(image, clusteredCCs, CV_GRAY2BGR);
@@ -115,7 +115,7 @@ void showCentroidClusters(const Mat& image, const vector<ccCluster>& clustersByC
             drawCC(clusteredCCs, cc, colour);
         }
     }
-    showImage(clusteredCCs);
+    showImage(clusteredCCs, title);
 }
 
 // input must be either CV_8U, CV_32F or CV_64F

@@ -86,12 +86,24 @@ auto levenshtein(std::string a, std::string b) -> size_t {
  * Since LD(a, b) <= max(|a|, |b|), this is a rough way to create a
  * 'correctness' fraction using the Levenshtein distance function
  */
-double levenshteinScore(const std::string& a, const std::string& b) {
+double stringSimilarity(const std::string &a, const std::string &b) {
 	if (a.empty() || b.empty()) {
 		return a.empty() && b.empty() ? 1.0 : 0.0;
 	}
     auto maxLevDistance = std::max(a.size(), b.size());
     return 1.0 - levenshtein(a, b)/(double)maxLevDistance;
+}
+
+/*
+ * Asymmetric string similarity. String b is assumed to be ground truth string,
+ * so its length is used to normalise the levenshtein distance.
+ * Minimum score is still zero
+ */
+double asymStringSimilarity(const std::string &a, const std::string &b) {
+	if (a.empty() || b.empty()) {
+		return a.empty() && b.empty() ? 1.0 : 0.0;
+	}
+	return std::max(0.0, 1.0 - levenshtein(a, b)/(double)b.size());
 }
 
 #endif // LEVENSHTEIN_H

@@ -19,7 +19,7 @@
 
 
 
-void showCentroidClusters(const cv::Mat&, const std::vector<ccCluster>&);
+void showCentroidClusters(const cv::Mat&, const std::vector<ccCluster>&, const std::string& title="");
 void showRowBounds(const cv::Mat&, const std::vector<ccCluster>&);
 
 int findMedian(std::vector<int> numbers);

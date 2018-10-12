@@ -34,6 +34,7 @@
 #include <algorithm>
 #include <numeric>
 #include <stdexcept>
+#include <vector>
 
 
 using cv::Mat;
@@ -42,8 +43,8 @@ using std::vector;
 // global parameters in terms of the size of the input image
 
 // const int CENTROID_CLUSTER_BANDWIDTH = 20;
-static int centroidClusterBandwidth(int w, int h) {
-    return std::min(w, h)/75;
+static int rowClusterBandwidth(int w, int h) {
+    return h/100;
 }
 
 
@@ -54,6 +55,10 @@ static int minCCArea(int w, int h) {
 }
 static int minCCBoxArea(int w, int h) {
     return 2*minCCArea(w, h);
+}
+
+static int maxCCBoxArea(int w, int h) {
+    return w*h/20;
 }
 
 // Returns whether x is in the closed interval [a, b]
@@ -88,6 +93,7 @@ const double MIN_RECT_ASPECT_RATIO = 0.05;
 static bool isPlausibleCCSize(const CComponent& c, int imgW, int imgH) {
     return c.area >= minCCArea(imgW, imgH) &&
            c.width*c.height >= minCCBoxArea(imgW, imgH) &&
+           c.width*c.height <= maxCCBoxArea(imgW, imgH) &&
          inInterval(c.aspectRatio, MIN_CC_ASPECT_RATIO, MAX_CC_ASPECT_RATIO);
 }
 
@@ -150,7 +156,7 @@ Table tableExtract(const Mat &image, tesseract::TessBaseAPI& tesseractAPI, cv::M
 
     Mat rects = overlayWords(binarised, wordsByRow, false);
     if (!batchMode) {
-        showImage(rects);
+        showImage(rects, "combined rects");
     }
 
     /*
@@ -158,32 +164,27 @@ Table tableExtract(const Mat &image, tesseract::TessBaseAPI& tesseractAPI, cv::M
      * there must be more rectangles lying between distinct column separators
      * than the number of rectangles that either one intersects
      */
-    // estimate number of columns as median/mean of rects in each row?
 
-    //unsigned char rectsPerRowIQR;
-    unsigned char rectsPerRowQ1; // 1st quartile
-    //unsigned char rectsPerRowQ2; // median
-    //unsigned char rectsPerRowQ3; // 3rd quartile
+    // only use rows with more word boxes than this to estimate column count
+    // set to some quantiles
 
+    size_t minRectsPerRow;
+    size_t maxRectsPerRow;
     {
-        Mat rectsPerRow;
-        Mat sortedRectsPerRow;
+        std::vector<size_t> rectsPerRow;
         for (auto &row : wordsByRow) {
-            auto s = static_cast<unsigned char>(row.size());
-            if (s != 0) {
-                rectsPerRow.push_back(s);
+            if (!row.empty()) {
+                rectsPerRow.push_back(row.size());
             }
         }
         if (!rectsPerRow.empty()) {
-            cv::sort(rectsPerRow, sortedRectsPerRow, CV_SORT_EVERY_COLUMN | CV_SORT_ASCENDING);
-            //cv::integral(sortedRectsPerRow, sumRectsPerRow, sumSqRectsPerRow, CV_32S, CV_64F);
-            auto n = rectsPerRow.rows; // guaranteed n > 0
-            rectsPerRowQ1 = sortedRectsPerRow.at<unsigned char>(n / 4);
-            //rectsPerRowQ2 = sortedRectsPerRow.at<unsigned char>(n / 2);
-            //rectsPerRowQ3 = sortedRectsPerRow.at<unsigned char>(n * 3 / 4);
-            //rectsPerRowIQR = rectsPerRowQ3 - rectsPerRowQ1;
+            std::sort(rectsPerRow.begin(), rectsPerRow.end());
+            auto n = rectsPerRow.size(); // guaranteed n > 0
+            minRectsPerRow = rectsPerRow[n/4];
+            maxRectsPerRow = rectsPerRow[n*4/5];
         } else {
-            rectsPerRowQ1 = 0;
+            minRectsPerRow = 0;
+            maxRectsPerRow = (size_t) -1; // largest size
             fprintf(stderr, "tableExtract(): no nonempty rows!!\n");
         }
     }
@@ -195,8 +196,8 @@ Table tableExtract(const Mat &image, tesseract::TessBaseAPI& tesseractAPI, cv::M
         for (auto &row : wordsByRow) {
             for (wordBB &w : row) {
                 w.setRow(rowNum);
-                if (row.size() >= rectsPerRowQ1) {
-                    // otherwise too few rows for accurate column number estimation is likely to be faulty
+                if (row.size() >= minRectsPerRow && row.size() <= maxRectsPerRow) {
+                    // otherwise it will probably screw up column number estimation
                     wordBBsforColumnInference.push_back(w);
                 }
                 allWordBBs.push_back(w);
@@ -206,22 +207,30 @@ Table tableExtract(const Mat &image, tesseract::TessBaseAPI& tesseractAPI, cv::M
                 rowNum++;
             }
         }
-        if (!batchMode) {
-            Mat rowRects = overlayWords(binarised, allWordBBs, false);
-            showImage(rowRects);
-        }
     }
 
-    int estimatedColumns = estimateNumberOfColumns(wordBBsforColumnInference, image.cols, rects, batchMode);
+    Mat allRowRects = overlayWords(binarised, allWordBBs, true);
+    Mat columnRects = overlayWords(binarised, wordBBsforColumnInference, true);
+    if (!batchMode) {
+        showImage(allRowRects, "all combined WordBBs");
+        showImage(columnRects, "wordBBs for column Inference");
+    }
+
+    int estimatedColumns = estimateNumberOfColumns(wordBBsforColumnInference, image.cols, columnRects, batchMode);
     classifyColumns(allWordBBs, estimatedColumns, image.cols, batchMode);
 
     // sort the wordBBs by row, then by column, then by x coordinate
     std::sort(allWordBBs.begin(), allWordBBs.end(), [](const wordBB &a, const wordBB &b) -> bool {
         // sort predicate returns true if a < b
-        std::array<int, 3> aCoords {a.row(), a.col(), a.x};
-        std::array<int, 3> bCoords {b.row(), b.col(), b.x};
+        std::array<int, 3> aCoords {a.row(), a.col(), a.left};
+        std::array<int, 3> bCoords {b.row(), b.col(), b.left};
         return std::lexicographical_compare(aCoords.begin(), aCoords.end(), bCoords.begin(), bCoords.end());
     });
+
+    Mat classifiedWordBBs = overlayWords(binarised, allWordBBs, true);
+    if (!batchMode) {
+        showImage(classifiedWordBBs, "classified wordBBs");
+    }
 
     vector<wordBB> combinedWordBBs;
     {
@@ -284,7 +293,7 @@ static void classifyColumns(vector<wordBB>& words, int numColumns, int imageWidt
     Mat wordBBcentroidX((int) words.size(), 1, CV_64FC1);
     for (unsigned int i = 0; i < words.size(); ++i) {
         const wordBB& w = words[i];
-        double centroidX = w.x + w.width / 2.0f;
+        double centroidX = w.left + w.width / 2.0f;
         wordBBcentroidX.at<double>(i, 0) = centroidX;
     }
 
@@ -450,8 +459,8 @@ vector<vector<wordBB>> findWords(const Mat &binarised, bool batchMode) {
         if (isPlausibleCCSize(cc, binarised.cols, binarised.rows)) {
             //yCentroids.push_back(meanShift::Point {i, {centroidY}});
             // include height and width in clustering decision
-            auto ccHeight = static_cast<double>(cc.height);
-            yCentroids.push_back(meanShift::Point<CComponent>{cc, {cc.centroidY, ccHeight}});
+            //yCentroids.emplace_back(meanShift::Point<CComponent>{cc, {cc.centroidY, (double)cc.height}});
+            yCentroids.emplace_back(meanShift::Point<CComponent>{cc, {cc.centroidY}});
         }
     }
     if (!batchMode) {
@@ -471,10 +480,10 @@ vector<vector<wordBB>> findWords(const Mat &binarised, bool batchMode) {
     }
 
     // TODO justify bandwidth parameter
-    auto ccClusters = meanShift::cluster(yCentroids, centroidClusterBandwidth(binarised.rows, binarised.cols));
+    auto ccClusters = meanShift::cluster(yCentroids, rowClusterBandwidth(binarised.cols, binarised.rows));
     /*
     // show cluster modes
-    for (Cluster& c : centroidClusters) {
+    for (Cluster& c : ccClusters) {
         int mode = static_cast<int>(c.mode[0]);
         cv::line(allComponents, cv::Point(0, mode), cv::Point(allComponents.cols, mode), 255, thickness=3);
     }
@@ -486,43 +495,38 @@ vector<vector<wordBB>> findWords(const Mat &binarised, bool batchMode) {
     /*
      * Within each cluster above, cluster again based on bounding box height, and keep only the largest cluster
      */
-    vector<ccCluster> clustersByCentroid/*(centroidClusters.getSize())*/;
+    vector<ccCluster> clustersByCentroid;
+    clustersByCentroid.reserve(ccClusters.size());
+    vector<ccCluster> allClustersByCentroid;
+    constexpr int MAX_ROW_CLUSTER_SIZE = 40;
     for (ccCluster &ithCluster : ccClusters) {
-        // use to find median of cluster height
         const auto CCs = ithCluster.getData();
-        const auto firstCC = CCs.cbegin();
-        const auto lastCC = CCs.cend();
-        using std::accumulate;
-        const auto sumHeight = accumulate(firstCC, lastCC, 0, [](long total, const CComponent& cc) -> long {
-            return total + cc.height;
-        });
-        const auto sumSqHeight = accumulate(firstCC, lastCC, 0, [](long total, const CComponent& cc) -> long {
-            return total + cc.height*cc.height;
-        });
-        vector<meanShift::Point<CComponent>> ccLabelsInCluster/*(centroidClusters.getSize())*/;
+        vector<meanShift::Point<CComponent>> ccLabelsInCluster;
+        ccLabelsInCluster.reserve(CCs.size());
         for (const CComponent &cc : CCs) {
-            // add width too?
+            // TODO add width too?
             ccLabelsInCluster.emplace_back(meanShift::Point<CComponent>{cc, {(double)cc.height}});
         }
-        // actually should use median height
         // TODO justify bandwidth parameter
-        // should be scale invariant! -> mean, median, mode?
-
-        auto n = static_cast<double>(CCs.size());
-        double avgHeightSquared = (sumHeight/n)*(sumHeight/n);
-        // sqrt(E[X^2] - E[X]^2)
-        double stddev = sqrt(sumSqHeight/n - avgHeightSquared);
-        //double mean = (1.0*sumHeight)/heights.size();
-        //double median = findMedian(heights);
-        double bwMultiplier = 1.0;
-        ccClusterList heightClusters = meanShift::cluster<CComponent>(ccLabelsInCluster, stddev * bwMultiplier);
+        // TODO try making it the average height of each row... e.g image height divided by number of clusters by centroid
+        double heightClusterBw = 0.75*rowClusterBandwidth(binarised.cols, binarised.rows);
+        auto heightClusters = meanShift::cluster<CComponent>(ccLabelsInCluster, heightClusterBw);
         heightClusters.sortBySize();
-        // save biggest
-        clustersByCentroid.push_back(heightClusters[0]);
+        // save biggest, subject to not being too big
+        bool foundLargestAcceptable = false;
+        for (const auto& c : heightClusters) {
+            allClustersByCentroid.push_back(c);
+            if (c.getSize() <= MAX_ROW_CLUSTER_SIZE && !foundLargestAcceptable) {
+                clustersByCentroid.push_back(c);
+                foundLargestAcceptable = true;
+            }
+            //printf("Cluster size: %d\n", c.getSize());
+        }
     }
 
     if (!batchMode) {
-        showCentroidClusters(binarised, clustersByCentroid);
+        showCentroidClusters(binarised, allClustersByCentroid, "all height clusters in row");
+        showCentroidClusters(binarised, clustersByCentroid, "largest height cluster in row");
     }
     //showRowBounds(binarised, clustersByCentroid);
 
@@ -586,8 +590,11 @@ static void doOcr(const Mat& imageForOcr, tesseract::TessBaseAPI& tesseractAPI, 
 static int estimateNumberOfColumns(const vector<wordBB>& wordBBs, int width, const Mat& rects, bool batchMode) {
     // this will count how many rects (from eligible rows) would be intersected by a cut at the given X coordinate
     Mat rectsCutByXCoord(width, 1, CV_64FC1, cv::Scalar(0));
-    for (const auto & word: wordBBs) {
-        for (int j = word.x; j < word.x + word.width; ++j) {
+    for (auto word: wordBBs) {
+        word.expandWidthPx(15);
+        word.constrain(0, 0, width, width); // don't care about bottom dim, since this word is a copy
+        // for wordBBs, add a little but of overlap for each one
+        for (auto j = word.left; j < word.right(); ++j) {
             rectsCutByXCoord.at<double>(j) += 1.0;
         }
     }
