@@ -73,7 +73,7 @@ std::string getCleanedText(tesseract::TessBaseAPI &tesseractAPI, const wordBB& w
     cv::morphologyEx(ccsInRect, ccsInRect, cv::MorphTypes::MORPH_OPEN, structuringElement(2, 8, cv::MORPH_RECT));
     */
 
-    tesseractAPI.SetRectangle(w.left, w.top, w.width, w.height);
+    tesseractAPI.SetRectangle(w.left(), w.top(), w.width(), w.height());
 
     // assume only ASCII characters, by using whitelist
     const char *out = tesseractAPI.GetUTF8Text();

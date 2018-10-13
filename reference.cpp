@@ -68,12 +68,6 @@ static bool inInterval(T x, T a, T b) {
     return x >= a && x <= b;
 }
 
-// width : height
-static double aspectRatio(int width, int height) {
-    return std::max(1, width)/(double) std::max(1, height);
-}
-
-
 /*
 const int MIN_COMBINED_RECT_AREA = 1000;
 const int MAX_COMBINED_RECT_AREA = 2000*1500/4;
@@ -92,28 +86,23 @@ const double MIN_RECT_ASPECT_RATIO = 0.05;
  */
 static bool isPlausibleCCSize(const CComponent& c, int imgW, int imgH) {
     return c.area >= minCCArea(imgW, imgH) &&
-           c.width*c.height >= minCCBoxArea(imgW, imgH) &&
-           c.width*c.height <= maxCCBoxArea(imgW, imgH) &&
-         inInterval(c.aspectRatio, MIN_CC_ASPECT_RATIO, MAX_CC_ASPECT_RATIO);
+           c.boxArea() >= minCCBoxArea(imgW, imgH) &&
+           c.boxArea() <= maxCCBoxArea(imgW, imgH) &&
+           inInterval(c.boxAspectRatio(), MIN_CC_ASPECT_RATIO, MAX_CC_ASPECT_RATIO);
 }
 
 static bool isPlausibleWordBBSize(const wordBB& w, int imgW, int imgH) {
-    int imageArea = imgW*imgH;
-    int wordArea = w.getArea();
-    int wordW = w.width;
-    int wordH = w.height;
     int minArea = 0; //imageArea/3000;
-    int maxArea = imageArea/4;
+    int maxArea = imgW*imgH/4;
     int minHeight = imgH/150;
     int maxHeight = imgH/4;
-    int minWidth = 0; //imgW/200;
-    int maxWidth = imgW;
-    double ratio = aspectRatio(wordW, wordH);
+    int minWidth = imgW/200;
+    int maxWidth = imgW*3/4;
 
-    return inInterval(wordW, minWidth, maxWidth)
-           && inInterval(wordH, minHeight, maxHeight)
-           && inInterval(wordArea, minArea, maxArea)
-           && inInterval(ratio, MIN_RECT_ASPECT_RATIO, MAX_RECT_ASPECT_RATIO);
+    return inInterval(w.width(), minWidth, maxWidth)
+           && inInterval(w.height(), minHeight, maxHeight)
+           && inInterval(w.boxArea(), minArea, maxArea)
+           && inInterval(w.boxAspectRatio(), MIN_RECT_ASPECT_RATIO, MAX_RECT_ASPECT_RATIO);
 }
 
 /*
@@ -198,7 +187,12 @@ Table tableExtract(const Mat &image, tesseract::TessBaseAPI& tesseractAPI, cv::M
                 w.setRow(rowNum);
                 if (row.size() >= minRectsPerRow && row.size() <= maxRectsPerRow) {
                     // otherwise it will probably screw up column number estimation
-                    wordBBsforColumnInference.push_back(w);
+
+                    // add a little but of overlap when we do the row counts
+                    wordBB toExpand(w);
+                    toExpand.expandWidthPx(15);
+                    toExpand.constrain(0, 0, binarised.cols, binarised.rows);
+                    wordBBsforColumnInference.push_back(toExpand);
                 }
                 allWordBBs.push_back(w);
             }
@@ -222,8 +216,8 @@ Table tableExtract(const Mat &image, tesseract::TessBaseAPI& tesseractAPI, cv::M
     // sort the wordBBs by row, then by column, then by x coordinate
     std::sort(allWordBBs.begin(), allWordBBs.end(), [](const wordBB &a, const wordBB &b) -> bool {
         // sort predicate returns true if a < b
-        std::array<int, 3> aCoords {a.row(), a.col(), a.left};
-        std::array<int, 3> bCoords {b.row(), b.col(), b.left};
+        std::array<int, 3> aCoords {a.row(), a.col(), a.left()};
+        std::array<int, 3> bCoords {b.row(), b.col(), b.left()};
         return std::lexicographical_compare(aCoords.begin(), aCoords.end(), bCoords.begin(), bCoords.end());
     });
 
@@ -243,8 +237,8 @@ Table tableExtract(const Mat &image, tesseract::TessBaseAPI& tesseractAPI, cv::M
                 if (firstWord) {
                     firstWord = false;
                 } else {
-                    auto combined = combineWordBBs(wordsInCurrentCell, image.cols, image.rows);
-                    combined.expandMinOf(10, 20);
+                    auto combined = wordBB::combineAll(wordsInCurrentCell);
+                    combined.expandMinOf(10, 0.2);
                     combined.constrain(0, 0, image.cols, image.rows);
                     combined.setCol(currentColumn);
                     combined.setRow(currentRow);
@@ -276,7 +270,7 @@ Table tableExtract(const Mat &image, tesseract::TessBaseAPI& tesseractAPI, cv::M
     Table t(estimatedColumns);
     // now we can assume there is only one wordBB per row and column
     for (const wordBB &w : combinedWordBBs) {
-        t.setColumnText(w.row(), w.col(), w.text);
+        t.setColumnText(w.row(), w.col(), w.text());
     }
 
     // TODO Contour / line detection
@@ -292,9 +286,7 @@ static void classifyColumns(vector<wordBB>& words, int numColumns, int imageWidt
     }
     Mat wordBBcentroidX((int) words.size(), 1, CV_64FC1);
     for (unsigned int i = 0; i < words.size(); ++i) {
-        const wordBB& w = words[i];
-        double centroidX = w.left + w.width / 2.0f;
-        wordBBcentroidX.at<double>(i, 0) = centroidX;
+        wordBBcentroidX.at<double>(i, 0) = words[i].boxCentreX();
     }
 
     if (!batchMode) {
@@ -441,14 +433,13 @@ vector<vector<wordBB>> findWords(const Mat &binarised, bool batchMode) {
     vector<CComponent> allCCs;
 
     for (int label = 0; label < nlabels; ++label) {
-        CComponent cc;
+        auto left = stats.at<int>(label, cv::CC_STAT_LEFT);
+        auto top = stats.at<int>(label, cv::CC_STAT_TOP);
+        auto width = stats.at<int>(label, cv::CC_STAT_WIDTH);
+        auto height = stats.at<int>(label, cv::CC_STAT_HEIGHT);
+        CComponent cc(left, top, width, height);
         cc.label = label;
-        cc.left = stats.at<int>(label, cv::CC_STAT_LEFT);
-        cc.top = stats.at<int>(label, cv::CC_STAT_TOP);
-        cc.height = stats.at<int>(label, cv::CC_STAT_HEIGHT);
-        cc.width = stats.at<int>(label, cv::CC_STAT_WIDTH);
         cc.area = stats.at<int>(label, cv::CC_STAT_AREA);
-        cc.aspectRatio = aspectRatio(cc.width, cc.height);
         cc.centroidX = centroids.at<double>(label, 0);
         cc.centroidY = centroids.at<double>(label, 1);
         allCCs.push_back(cc);
@@ -505,11 +496,11 @@ vector<vector<wordBB>> findWords(const Mat &binarised, bool batchMode) {
         ccLabelsInCluster.reserve(CCs.size());
         for (const CComponent &cc : CCs) {
             // TODO add width too?
-            ccLabelsInCluster.emplace_back(meanShift::Point<CComponent>{cc, {(double)cc.height}});
+            ccLabelsInCluster.emplace_back(meanShift::Point<CComponent>{cc, {(double)cc.height()}});
         }
         // TODO justify bandwidth parameter
         // TODO try making it the average height of each row... e.g image height divided by number of clusters by centroid
-        double heightClusterBw = 0.75*rowClusterBandwidth(binarised.cols, binarised.rows);
+        double heightClusterBw = 1.5*rowClusterBandwidth(binarised.cols, binarised.rows);
         auto heightClusters = meanShift::cluster<CComponent>(ccLabelsInCluster, heightClusterBw);
         heightClusters.sortBySize();
         // save biggest, subject to not being too big
@@ -541,32 +532,30 @@ vector<vector<wordBB>> findWords(const Mat &binarised, bool batchMode) {
 
     // make 'rows' of 'words'
     vector<vector<wordBB>> rows;
+    rows.reserve(clustersByCentroid.size());
     // TODO maybe just cluster by width and X centroid?
     // TODO or estimate columns first, based on the raw connected components
-    for (ccCluster &c: clustersByCentroid) {
-        vector<vector<Interval>> closeCCsInCluster;
-        vector<Interval> intervals;
-        for (CComponent cc : c.getData()) {
-            intervals.emplace_back(Interval(cc.label, (double)cc.left, (double) cc.left + cc.width));
+    for (const ccCluster &cluster: clustersByCentroid) {
+        vector<wordBB> bbsInCluster;
+        bbsInCluster.reserve(cluster.getSize());
+        for (const CComponent& c : cluster.getData()) {
+            bbsInCluster.push_back(c.getBox());
         }
+
         // TODO group if they are closer than 1.5* median character width
-        Interval::groupCloseIntervals(intervals, closeCCsInCluster, 1.5, Interval::ExpandType::AVG);
         // TODO prevent them from getting too big?
         // TODO also make sure that they overlap vertically
 
-        // add new row
-        vector<wordBB> row;
-        rows.push_back(row);
-
+        auto combinedWords = wordBB::combineHorizontallyClose(bbsInCluster, 1.5, Interval::ExpandType::AVG);
+        vector<wordBB> likelyWords;
         // make rects for each partition
-        for (vector<Interval> &group : closeCCsInCluster) {
-            wordBB w(findBoundingRect(group, allCCs, binarised.cols, binarised.rows));
-            // simple filtering
-            // remove unlikely sized 'words'
+        for (const wordBB& w : combinedWords) {
+            // simple filtering: remove unlikely sized 'words'
             if (isPlausibleWordBBSize(w, binarised.cols, binarised.rows)) {
-                rows.back().push_back(w);
+                likelyWords.push_back(w);
             }
         }
+        rows.push_back(likelyWords);
     }
     return rows;
 }
@@ -582,7 +571,7 @@ static void doOcr(const Mat& imageForOcr, tesseract::TessBaseAPI& tesseractAPI, 
         w.text = getCleanedText(tesseractAPI, w, tessImage);
         showImage(tessImage, "OCR for wordBB");
         /*/
-        w.text = getCleanedText(tesseractAPI, w);
+        w.setText(getCleanedText(tesseractAPI, w));
         /**/
     }
 }
@@ -591,10 +580,7 @@ static int estimateNumberOfColumns(const vector<wordBB>& wordBBs, int width, con
     // this will count how many rects (from eligible rows) would be intersected by a cut at the given X coordinate
     Mat rectsCutByXCoord(width, 1, CV_64FC1, cv::Scalar(0));
     for (auto word: wordBBs) {
-        word.expandWidthPx(15);
-        word.constrain(0, 0, width, width); // don't care about bottom dim, since this word is a copy
-        // for wordBBs, add a little but of overlap for each one
-        for (auto j = word.left; j < word.right(); ++j) {
+        for (auto j = word.left(); j < word.right(); ++j) {
             rectsCutByXCoord.at<double>(j) += 1.0;
         }
     }

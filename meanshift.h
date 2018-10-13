@@ -39,7 +39,7 @@ namespace meanShift {
             return position(mode);
         }
 
-        int getSize() const {
+        size_t getSize() const {
             return size;
         }
         std::vector<T> getData() const {
@@ -52,7 +52,7 @@ namespace meanShift {
 
     private:
         position mode;
-        int size;
+        size_t size;
         std::vector<Point<T>> original_points;
         std::vector<Point<T>> shifted_points;
 

@@ -6,7 +6,7 @@
 #define REFERENCE_INTERVAL_H
 
 #include <vector>
-#include <cmath>
+#include <functional>
 
 class Interval {
 public:
@@ -17,35 +17,32 @@ public:
         , AVG // use the average of the two intervals' lengths to expand
     };
 
+    Interval(double point1, double point2) : Interval(0, point1, point2) {}
+
     Interval(int label, double point1, double point2) :
-        label(label), midpoint(halfway(point1, point2)), halflength(halfDistance(point1, point2)) {};
+        _label(label), midpoint(halfway(point1, point2)), halflength(halfDistance(point1, point2)) {}
 
-    double left() const { return midpoint - halflength; }
-    double right() const { return midpoint + halflength; }
-    int getLabel() const { return label; }
-
-
+    int label() const;
+    void setLabel(int label);
+    double left() const;
+    double right() const;
 
     // intervals vector needs to be copied because it's sorted
-    static void groupCloseIntervals(std::vector<Interval>, std::vector<std::vector<Interval>>&, double, ExpandType method = AVG);
+
+
+    template <typename T>
+    static std::vector<std::vector<T>> groupClose(const std::vector<T>& things, double expansion, ExpandType method, std::function<Interval(T)> makeInterval);
     static bool areClose(const Interval&, const Interval&, double expand = 1.0, ExpandType method = AVG);
     static bool closeToAny(const Interval&, const std::vector<Interval>& others, double expand = 1.0, ExpandType method = AVG);
 
 private:
-    int label;
+    int _label;
     double midpoint;
     double halflength;
 
-    static double halfway(double a, double b) {
-        return (a + b)/2.0;
-    }
-    static double distance(double a, double b) {
-        return fabs(a - b);
-    }
-    static double halfDistance(double a, double b) {
-        return distance(a, b)/2.0;
-    }
-
+    static double halfway(double a, double b);
+    static double distance(double a, double b);
+    static double halfDistance(double a, double b);
 };
 
 #endif //REFERENCE_INTERVAL_H

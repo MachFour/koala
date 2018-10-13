@@ -37,54 +37,10 @@ void drawCC(Mat& img, const CComponent& cc, cv::Scalar colour) {
      */
     //cv::drawMarker(img, cv::Point(centroidX, centroidY), /*colour=*/255, cv::MARKER_TILTED_CROSS, /*getSize=*/20, /*thickness=*/3);
     //int thickness = static_cast<int>(1+log(area));
-    cv::rectangle(img, cv::Point(cc.left, cc.top), cv::Point(cc.left + cc.width, cc.top + cc.height), colour, /*thickness=*/5);
+    cv::rectangle(img, cv::Point(cc.left(), cc.top()), cv::Point(cc.right(), cc.bottom()), colour, /*thickness=*/5);
 
 
 }
-
-cv::Rect findBoundingRect(const vector<Interval>& intervals, const vector<CComponent>& allCCs, int maxWidth, int maxHeight) {
-    auto minTop = maxHeight; // >= anything inside image
-    auto minLeft = maxWidth; // >= anything inside image
-    auto maxBottom = 0; // <= smaller than anything inside image
-    auto maxRight = 0; // <= smaller than anything inside image
-    for (const Interval& iv : intervals) {
-        // TODO avoid indexing back into global list
-        auto label = iv.getLabel();
-        auto top = allCCs[label].top;
-        auto height = allCCs[label].height;
-        auto width = allCCs[label].width;
-        auto left = allCCs[label].left;
-        minTop = std::min(top, minTop);
-        minLeft = std::min(left, minLeft);
-        maxBottom = std::max(top + height, maxBottom);
-        maxRight = std::max(left + width, maxRight);
-    }
-    // left(left), top(top), width, height
-    auto rectHeight = maxBottom - minTop;
-    auto rectWidth = maxRight - minLeft;
-
-    return cv::Rect(minLeft, minTop, rectWidth, rectHeight);
-}
-
-// basically a copy of findBoundingRect but for WordBBs
-wordBB combineWordBBs(const std::vector<wordBB>& toCombine, int maxWidth, int maxHeight) {
-    auto minY = maxHeight; // initially >= anything inside image
-    auto minX = maxWidth;  // initially >= anything inside image
-    auto maxY = 0;         // initially <= anything inside image
-    auto maxX = 0;         // initially <= anything inside image
-    for (const auto& w : toCombine) {
-        minY = std::min(w.top, minY);
-        minX = std::min(w.left, minX);
-        maxY = std::max(w.top + w.height, maxY);
-        maxX = std::max(w.left + w.width, maxX);
-    }
-    // left(left), top(top), width, height
-    auto height = maxY - minY;
-    auto width = maxX - minX;
-
-    return wordBB(minX, minY, width, height);
-}
-
 
 int findMedian(vector<int> numbers) {
     auto n = numbers.size();
@@ -111,7 +67,7 @@ void showCentroidClusters(const Mat& image, const vector<ccCluster>& clustersByC
     for (const ccCluster &c : clustersByCentroid) {
         // pick a pseudorandom nice colour
         cv::Scalar colour = pseudoRandomColour(13 * c.getSize(), ((int)c.getMode()[0]) % 157);
-        for (CComponent cc : c.getData()) {
+        for (const CComponent& cc : c.getData()) {
             drawCC(clusteredCCs, cc, colour);
         }
     }
@@ -171,8 +127,8 @@ void showRowBounds(const Mat& image, const vector<ccCluster>& clustersByCentroid
         int clusterSize = c.getSize();
         maxSize = std::max(clusterSize, maxSize);
         for (const CComponent& cc : c.getData()) {
-            minY = std::min(minY, cc.top);
-            maxY = std::max(maxY, cc.top + cc.height);
+            minY = std::min(minY, cc.top());
+            maxY = std::max(maxY, cc.bottom());
         }
         // rect parameters: x, y, width, height
         // we'll use width for getSize, height for height
