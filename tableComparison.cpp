@@ -40,34 +40,36 @@ comparisonResult compareTable(const Table& actual, const Table& expected) {
 
     // holds row matchings (actual-expected row pairings, **in that order**)
     // these will be sorted by comparing corresponding entries in distances (distances[i][j])
+    using std::vector;
     using std::pair;
-    std::vector<pair<int, int>> indexPairs;
+    vector<pair<int, int>> indexPairs;
+    vector<vector<double>> distances;
     reserveSpace(indexPairs, A*E);
+    reserveSpace(distances, A);
     {
-        std::vector<std::vector<size_t>> distances;
-        reserveSpace(distances, A);
         for (decltype(A) i = 0; i < A; ++i) {
-            std::vector<size_t> ithRowDistances;
+            vector<double> ithRowDistances;
             reserveSpace(ithRowDistances, E);
             for (decltype(E) j = 0; j < E; ++j) {
                 indexPairs.emplace_back(pair<int, int>(i, j));
-                ithRowDistances.push_back(levenshtein(actual.getText(i, 0), expected.getText(j, 0)));
+                ithRowDistances.push_back(asymStringSimilarity(actual.getText(i, 0), expected.getText(j, 0)));
             }
             distances.push_back(ithRowDistances);
         }
+        // sort scores in descending order
         sort(indexPairs.begin(), indexPairs.end(), [&distances](pair<int, int> a, pair<int, int> b) -> bool {
-            return distances[a.first][a.second] < distances[b.first][b.second];
+            return distances[a.first][a.second] > distances[b.first][b.second];
         });
     }
 
     // mapping from rows in Expected to assigned rows in Actual (injective mapping, not necessarily surjective)
-    std::vector<int> actualRowForExpRow(E, 0);
+    vector<int> actualRowForExpRow(E, 0);
     {
-        std::vector<bool> expectedRowAssigned((size_t)E, false);
-        std::vector<bool> actualRowAssigned((size_t)A, false);
+        vector<bool> expectedRowAssigned((size_t)E, false);
+        vector<bool> actualRowAssigned((size_t)A, false);
         decltype(E) rowsAssigned = 0;
         // now the pairs are sorted with closest string pairs first
-        // just greedily assign the expected table rows to the actual rows, by closes string matching
+        // just greedily assign the expected table rows to the actual rows, by closest string matching
         for (const pair<int, int> &matchings : indexPairs) {
             auto actualRowIdx = matchings.first;
             auto expectedRowIdx = matchings.second;
@@ -93,8 +95,8 @@ comparisonResult compareTable(const Table& actual, const Table& expected) {
     */
 
     // levenshtein distance
-    std::vector<double> keyColScores; // holds levenshtein distance for the between first columns (keys) in each row
-    std::vector<double> avgValueColScores; // holds the average levenshtein distance for the remaining columns in each row
+    vector<double> keyColScores; // holds levenshtein distance for the between first columns (keys) in each row
+    vector<double> avgValueColScores; // holds the average levenshtein distance for the remaining columns in each row
     {
         reserveSpace(keyColScores, E);
         reserveSpace(avgValueColScores, E);
@@ -108,18 +110,19 @@ comparisonResult compareTable(const Table& actual, const Table& expected) {
             // pretend that the table with fewer columns has just empty strings in those extra columns
 
             auto numValueColumns = std::max(actual.numCols(), expected.numCols()) - 1; // no underflow due to earlier check
+            /* Compare as many columns as we can: from 1 to min(actual.columns, expected.columns) - 1
+             * The remaining columns implicitly get a score of 0, because we use
+             *    numValueColumns = max(actual.columns, expected.columns) - 1 (which is > 0)
+             * as the normalising constant
+             */
+            auto numValueColumnsForCompare = std::min(actual.numCols(), expected.numCols()) - 1;
             double avgValueColScore;
             if (numValueColumns == 0) {
                 avgValueColScore = 1.0; // nothing to compare, so perfect score
             } else {
-                /* Compare as many columns as we can: from 1 to min(actual.columns, expected.columns) - 1
-                 * The remaining columns implicitly get a score of 0, because we use
-                 *    numValueColumns = max(actual.columns, expected.columns) - 1 (which is > 0)
-                 * as the normalising constant
-                 */
                 avgValueColScore = 0.0;
-                for (decltype(numValueColumns) j = 1; j < std::min(actual.numCols(), expected.numCols()) - 1; ++j) {
-                    avgValueColScore += asymStringSimilarity(actualRow[j], expectedRow[j]) / numValueColumns;
+                for (decltype(numValueColumns) j = 0; j < numValueColumnsForCompare; ++j) {
+                    avgValueColScore += asymStringSimilarity(actualRow[j+1], expectedRow[j+1]) / numValueColumns;
                 }
             }
             avgValueColScores.push_back(avgValueColScore);

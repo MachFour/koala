@@ -42,9 +42,10 @@ namespace meanShift {
         size_t getSize() const {
             return size;
         }
+
         std::vector<T> getData() const {
             std::vector<T> getData;
-            for (const Point<T>& p : original_points) {
+            for (const Point<T> &p : original_points) {
                 getData.push_back(p.data);
             }
             return getData;
@@ -55,27 +56,13 @@ namespace meanShift {
         size_t size;
         std::vector<Point<T>> original_points;
         std::vector<Point<T>> shifted_points;
-
     };
 
     template <typename T>
-    class ClusterList : public std::vector<Cluster<T>> {
-        public:
-            void sortBySize(bool descending = true) {
-                // sort ensures that the compare function resturns true on any two successive elements
-                auto compareFunc = descending ?
-                          [](Cluster<T> &c1, Cluster<T> &c2) -> bool { return c1.getSize() > c2.getSize(); }
-                        : [](Cluster<T> &c1, Cluster<T> &c2) -> bool { return c1.getSize() < c2.getSize(); };
-                std::sort(this->begin(), this->end(), compareFunc);
-            }
-    };
-
-    template <typename T>
-    ClusterList<T> cluster(const std::vector<Point<T>>&, double, kernelFunc = gaussianKernel);
+    std::vector<Cluster<T>> cluster(const std::vector<Point<T>>&, double, kernelFunc = gaussianKernel);
 
 }
 
-using ccCluster = meanShift::Cluster<CComponent>;
-using ccClusterList = meanShift::ClusterList<CComponent>;
+using ccCluster = meanShift::Cluster<CC>;
 
 #endif //MEANSHIFT_H

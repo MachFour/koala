@@ -10,12 +10,12 @@
  * Class to store all the connected component details/stats, as returned by
  * opencv's connectedComponentsWithStats()
  */
-class CComponent {
+class CC {
 public:
 
-    CComponent() : CComponent(0, 0, 0, 0) {}
+    CC() : CC(0, 0, 0, 0) {}
 
-    CComponent(int left, int top, int width, int height) :
+    CC(int left, int top, int width, int height) :
             area(0), centroidX(0), centroidY(0), label(0),
             box(left, top, width, height) {}
     int area;

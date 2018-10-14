@@ -24,7 +24,7 @@ void showRowBounds(const cv::Mat&, const std::vector<ccCluster>&);
 
 int findMedian(std::vector<int> numbers);
 
-void drawCC(cv::Mat&, const CComponent&, cv::Scalar colour = cv::Scalar(255, 255, 255));
+void drawCC(cv::Mat&, const CC&, cv::Scalar colour = cv::Scalar(255, 255, 255));
 cv::Mat overlayWords(const cv::Mat &image, const std::vector<std::vector<wordBB>> &words, bool colourByRowCol=false);
 cv::Mat overlayWords(const cv::Mat &image, const std::vector<wordBB> &allWordBBs, bool colourByRowCol=false);
 

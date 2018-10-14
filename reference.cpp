@@ -43,8 +43,11 @@ using std::vector;
 // global parameters in terms of the size of the input image
 
 // const int CENTROID_CLUSTER_BANDWIDTH = 20;
-static int rowClusterBandwidth(int w, int h) {
-    return h/100;
+static double rowClusterBandwidth(int h) {
+    return h/80.0;
+}
+static double heightClusterBandwidth(int h) {
+    return 1.5*rowClusterBandwidth(h);
 }
 
 
@@ -84,7 +87,7 @@ const double MIN_RECT_ASPECT_RATIO = 0.05;
 /*
  * Connected component and combined CC / wordBB size
  */
-static bool isPlausibleCCSize(const CComponent& c, int imgW, int imgH) {
+static bool isPlausibleCCSize(const CC& c, int imgW, int imgH) {
     return c.area >= minCCArea(imgW, imgH) &&
            c.boxArea() >= minCCBoxArea(imgW, imgH) &&
            c.boxArea() <= maxCCBoxArea(imgW, imgH) &&
@@ -111,7 +114,7 @@ static bool isPlausibleWordBBSize(const wordBB& w, int imgW, int imgH) {
 static Mat preprocess(const Mat&, bool);
 static vector<vector<wordBB>> findWords(const Mat&, bool);
 static int estimateNumberOfColumns(const vector<wordBB>& wordBBs, int width, const Mat& rects, bool batchMode);
-static void classifyColumns(std::vector<wordBB>&, int, int, bool batchMode=true);
+static void classifyColumns(std::vector<wordBB>&, int, const Mat& rects, bool batchMode=true);
 static void doOcr(const Mat&, tesseract::TessBaseAPI&, vector<wordBB>&);
 
 Table tableExtract(const Mat &image, tesseract::TessBaseAPI& tesseractAPI, cv::Mat * wordBBImg, bool batchMode) {
@@ -211,7 +214,7 @@ Table tableExtract(const Mat &image, tesseract::TessBaseAPI& tesseractAPI, cv::M
     }
 
     int estimatedColumns = estimateNumberOfColumns(wordBBsforColumnInference, image.cols, columnRects, batchMode);
-    classifyColumns(allWordBBs, estimatedColumns, image.cols, batchMode);
+    classifyColumns(allWordBBs, estimatedColumns, columnRects, batchMode);
 
     // sort the wordBBs by row, then by column, then by x coordinate
     std::sort(allWordBBs.begin(), allWordBBs.end(), [](const wordBB &a, const wordBB &b) -> bool {
@@ -277,92 +280,6 @@ Table tableExtract(const Mat &image, tesseract::TessBaseAPI& tesseractAPI, cv::M
     //showImage(binarised);
     return t;
 }
-
-static void classifyColumns(vector<wordBB>& words, int numColumns, int imageWidth, bool batchMode) {
-    // now put horizontal centres of all wordBBs into a Mat and run kmeans
-    if (words.empty()) {
-        fprintf(stderr, "classifyColumns(): warning: words list was empty");
-        return;
-    }
-    Mat wordBBcentroidX((int) words.size(), 1, CV_64FC1);
-    for (unsigned int i = 0; i < words.size(); ++i) {
-        wordBBcentroidX.at<double>(i, 0) = words[i].boxCentreX();
-    }
-
-    if (!batchMode) {
-        printf("Mixture model with %u components and centroid X values:\n", numColumns);
-        for (unsigned int i = 0; i < words.size(); ++i) {
-            printf("%.1f, ", wordBBcentroidX.at<double>(i, 0));
-        }
-        printf("\n");
-    }
-
-    //cv::TermCriteria termCriteria(cv::TermCriteria::EPS + cv::TermCriteria::COUNT, 1000, 0.001);
-
-    /* Use EM Algorithm as slight generalisation of k-means, to allow different cluster sizes / column widths
-     * initialise with means (column centres) spread uniformly across width of image.
-     * (This wasn't easy to do with the k-means algorithm)
-     */
-    auto emAlg = cv::ml::EM::create();
-    emAlg->setClustersNumber(numColumns);
-    //emAlg->setTermCriteria(termCriteria);
-    // since we're in 1D, COV_MAT_DIAGONAL (separate sigma for each dim)
-    // is equivalent to COV_MAT_SPHERICAL (all dims have same sigma)
-    emAlg->setCovarianceMatrixType(cv::ml::EM::Types::COV_MAT_SPHERICAL);
-    Mat initialMeans(numColumns, 1, CV_64FC1);
-    for (auto i = 0; i < numColumns; ++i) {
-        // want the centre (hence +0.5) of the ith column,
-        // when image is divided into numColumns parts of equal width
-        initialMeans.at<double>(i, 0) = (i + 0.5) / numColumns * imageWidth;
-    }
-    if (!batchMode) {
-        for (auto i = 0; i < numColumns; ++i) {
-            printf("Mixture %d initial mean: %f\n", i, initialMeans.at<double>(i, 0));
-        }
-    }
-    // cluster samples around initial means
-    // don't provide initial covariance matrix estimates, or weights
-    /*
-     * signature:
-     * trainE(InputArray samples, InputArray means0, InputArray covs0, InputArray weights0,
-     *     OutputArray logLikelihoods, OutputArray labels, OutputArray probs)
-     */
-    Mat bestLabels;
-    emAlg->trainE(wordBBcentroidX, initialMeans, cv::noArray(), cv::noArray(), cv::noArray(), bestLabels);
-
-    Mat means = emAlg->getMeans();
-    if (!batchMode) {
-        for (auto i = 0; i < numColumns; ++i) {
-            printf("Mixture %d: mean=%f\n", i, means.at<double>(i));
-        }
-    }
-
-    /*
-    //Mat outputCentres;
-    cv::kmeans(wordBBcentroidX, numColumns, bestLabels, termCriteria, 3, cv::KMEANS_PP_CENTERS, outputCentres);
-    */
-    // apply column labels
-    {
-        /* Labels might not be in order of left-to-right columns, so we need to create this mapping */
-        vector<int> labelOrder(numColumns, 0);
-        std::iota(labelOrder.begin(), labelOrder.end(), 0);
-        std::sort(labelOrder.begin(), labelOrder.end(), [&means](int a, int b) -> bool {
-            return means.at<double>(a) < means.at<double>(b);
-        });
-        const auto firstLabel = labelOrder.cbegin();
-        const auto lastLabel = labelOrder.cend();
-        for (auto i = 0; i < (int) words.size(); ++i) {
-            auto currentLabel = bestLabels.at<int>(i);
-            // TODO could be more efficient than std::find every time but it probably doesn't matter
-            // find which column the label corresponds to
-            // std::find returns an iterator, so the corresponding index is found by 'subtracting' the begin() iterator
-            auto column = static_cast<unsigned int>(std::find(firstLabel, lastLabel, currentLabel) - firstLabel);
-            words[i].setCol(column);
-        }
-    }
-}
-
-
 static cv::Mat preprocess(const cv::Mat& grey8, bool batchMode) {
     using cv::Mat;
 
@@ -430,14 +347,14 @@ vector<vector<wordBB>> findWords(const Mat &binarised, bool batchMode) {
     Mat centroids;
     int nlabels = cv::connectedComponentsWithStats(binarised, labels, stats, centroids);
 
-    vector<CComponent> allCCs;
+    vector<CC> allCCs;
 
     for (int label = 0; label < nlabels; ++label) {
         auto left = stats.at<int>(label, cv::CC_STAT_LEFT);
         auto top = stats.at<int>(label, cv::CC_STAT_TOP);
         auto width = stats.at<int>(label, cv::CC_STAT_WIDTH);
         auto height = stats.at<int>(label, cv::CC_STAT_HEIGHT);
-        CComponent cc(left, top, width, height);
+        CC cc(left, top, width, height);
         cc.label = label;
         cc.area = stats.at<int>(label, cv::CC_STAT_AREA);
         cc.centroidX = centroids.at<double>(label, 0);
@@ -445,19 +362,19 @@ vector<vector<wordBB>> findWords(const Mat &binarised, bool batchMode) {
         allCCs.push_back(cc);
     }
 
-    vector<meanShift::Point<CComponent>> yCentroids;
-    for (const CComponent &cc: allCCs) {
+    vector<meanShift::Point<CC>> yCentroids;
+    for (const auto &cc: allCCs) {
         if (isPlausibleCCSize(cc, binarised.cols, binarised.rows)) {
             //yCentroids.push_back(meanShift::Point {i, {centroidY}});
             // include height and width in clustering decision
-            //yCentroids.emplace_back(meanShift::Point<CComponent>{cc, {cc.centroidY, (double)cc.height}});
-            yCentroids.emplace_back(meanShift::Point<CComponent>{cc, {cc.centroidY}});
+            //yCentroids.emplace_back(meanShift::Point<CC>{cc, {cc.centroidY, (double)cc.height}});
+            yCentroids.emplace_back(meanShift::Point<CC>{cc, {cc.centroidY}});
         }
     }
     if (!batchMode) {
         Mat allComponents = binarised.clone();
         Mat allowedComponents = binarised.clone();
-        for (const CComponent &cc: allCCs) {
+        for (const auto &cc: allCCs) {
             if (isPlausibleCCSize(cc, binarised.cols, binarised.rows)) {
                 drawCC(allComponents, cc);
                 drawCC(allowedComponents, cc);
@@ -471,7 +388,14 @@ vector<vector<wordBB>> findWords(const Mat &binarised, bool batchMode) {
     }
 
     // TODO justify bandwidth parameter
-    auto ccClusters = meanShift::cluster(yCentroids, rowClusterBandwidth(binarised.cols, binarised.rows));
+    auto ccClusters = meanShift::cluster(yCentroids, rowClusterBandwidth(binarised.rows));
+    {
+        // sort by increasing mode (Y Coordinate)
+        using ccCluster = meanShift::Cluster<CC>;
+        std::sort(ccClusters.begin(), ccClusters.end(), [](const ccCluster& c1, const ccCluster& c2) -> bool {
+            return c1.getMode()[0] < c2.getMode()[0];
+        });
+    }
     /*
     // show cluster modes
     for (Cluster& c : ccClusters) {
@@ -492,17 +416,20 @@ vector<vector<wordBB>> findWords(const Mat &binarised, bool batchMode) {
     constexpr int MAX_ROW_CLUSTER_SIZE = 40;
     for (ccCluster &ithCluster : ccClusters) {
         const auto CCs = ithCluster.getData();
-        vector<meanShift::Point<CComponent>> ccLabelsInCluster;
+        vector<meanShift::Point<CC>> ccLabelsInCluster;
         ccLabelsInCluster.reserve(CCs.size());
-        for (const CComponent &cc : CCs) {
+        for (const CC& cc : CCs) {
             // TODO add width too?
-            ccLabelsInCluster.emplace_back(meanShift::Point<CComponent>{cc, {(double)cc.height()}});
+            ccLabelsInCluster.emplace_back(meanShift::Point<CC>{cc, {(double)cc.height()}});
         }
         // TODO justify bandwidth parameter
         // TODO try making it the average height of each row... e.g image height divided by number of clusters by centroid
-        double heightClusterBw = 1.5*rowClusterBandwidth(binarised.cols, binarised.rows);
-        auto heightClusters = meanShift::cluster<CComponent>(ccLabelsInCluster, heightClusterBw);
-        heightClusters.sortBySize();
+        auto heightClusters = meanShift::cluster<CC>(ccLabelsInCluster, heightClusterBandwidth(binarised.rows));
+        using ccCluster = meanShift::Cluster<CC>;
+        std::sort(heightClusters.begin(), heightClusters.end(), [](const ccCluster& c1, const ccCluster& c2) -> bool {
+            return c1.getSize() > c2.getSize();
+        });
+
         // save biggest, subject to not being too big
         bool foundLargestAcceptable = false;
         for (const auto& c : heightClusters) {
@@ -538,7 +465,7 @@ vector<vector<wordBB>> findWords(const Mat &binarised, bool batchMode) {
     for (const ccCluster &cluster: clustersByCentroid) {
         vector<wordBB> bbsInCluster;
         bbsInCluster.reserve(cluster.getSize());
-        for (const CComponent& c : cluster.getData()) {
+        for (const CC& c : cluster.getData()) {
             bbsInCluster.push_back(c.getBox());
         }
 
@@ -560,26 +487,10 @@ vector<vector<wordBB>> findWords(const Mat &binarised, bool batchMode) {
     return rows;
 }
 
-static void doOcr(const Mat& imageForOcr, tesseract::TessBaseAPI& tesseractAPI, vector<wordBB> & allWordBBs) {
-    auto bytes_per_line = static_cast<int>(imageForOcr.step1() * imageForOcr.elemSize());
-    tesseractAPI.SetImage(imageForOcr.data, imageForOcr.cols, imageForOcr.rows, /*bytes_per_pixel=*/1, bytes_per_line);
-    tesseractAPI.SetSourceResolution(300);
-
-    for (wordBB &w : allWordBBs) {
-        /*
-        Mat tessImage;
-        w.text = getCleanedText(tesseractAPI, w, tessImage);
-        showImage(tessImage, "OCR for wordBB");
-        /*/
-        w.setText(getCleanedText(tesseractAPI, w));
-        /**/
-    }
-}
-
 static int estimateNumberOfColumns(const vector<wordBB>& wordBBs, int width, const Mat& rects, bool batchMode) {
     // this will count how many rects (from eligible rows) would be intersected by a cut at the given X coordinate
-    Mat rectsCutByXCoord(width, 1, CV_64FC1, cv::Scalar(0));
-    for (auto word: wordBBs) {
+    Mat rectsCutByXCoord(width, 1, CV_64FC1, cv::Scalar(0.0));
+    for (const auto& word: wordBBs) {
         for (auto j = word.left(); j < word.right(); ++j) {
             rectsCutByXCoord.at<double>(j) += 1.0;
         }
@@ -601,8 +512,8 @@ static int estimateNumberOfColumns(const vector<wordBB>& wordBBs, int width, con
             Mat plotResultSmoothedCounts;
             plotCounts->render(plotResultCounts);
             plotSmoothedCounts->render(plotResultSmoothedCounts);
-            showImage(0.5 * plotResultCounts + 0.5 * rects);
-            showImage(0.5 * plotResultSmoothedCounts + 0.5 * rects);
+            showImage(0.5 * plotResultCounts + 0.5 * rects, "words cut by X coordinate");
+            showImage(0.5 * plotResultSmoothedCounts + 0.5 * rects, "smoothed count data");
         }
 #endif // REFERENCE_ANDROID
     }
@@ -664,3 +575,140 @@ static int estimateNumberOfColumns(const vector<wordBB>& wordBBs, int width, con
     }
     return estimatedColumns;
 }
+
+static void classifyColumns(vector<wordBB>& words, int numColumns, const Mat& rectsImg, bool batchMode) {
+    // now put horizontal centres of all wordBBs into a Mat and run kmeans
+    if (words.empty()) {
+        fprintf(stderr, "classifyColumns(): warning: words list was empty");
+        return;
+    }
+    Mat wordBBcentroidX((int) words.size(), 1, CV_64FC1);
+    for (unsigned int i = 0; i < words.size(); ++i) {
+        wordBBcentroidX.at<double>(i, 0) = words[i].boxCentreX();
+    }
+
+    if (!batchMode) {
+        printf("Mixture model with %u components and centroid X values:\n", numColumns);
+        for (unsigned int i = 0; i < words.size(); ++i) {
+            printf("%.1f, ", wordBBcentroidX.at<double>(i, 0));
+        }
+        printf("\n");
+    }
+
+    //cv::TermCriteria termCriteria(cv::TermCriteria::EPS + cv::TermCriteria::COUNT, 1000, 0.001);
+
+    /* Use EM Algorithm as slight generalisation of k-means, to allow different cluster sizes / column widths
+     * initialise with means (column centres) spread uniformly across width of image.
+     * (This wasn't easy to do with the k-means algorithm)
+     */
+    auto emAlg = cv::ml::EM::create();
+    emAlg->setClustersNumber(numColumns);
+    //emAlg->setTermCriteria(termCriteria);
+    // since we're in 1D, COV_MAT_DIAGONAL (separate sigma for each dim)
+    // is equivalent to COV_MAT_SPHERICAL (all dims have same sigma)
+    emAlg->setCovarianceMatrixType(cv::ml::EM::Types::COV_MAT_SPHERICAL);
+    Mat initialMeans(numColumns, 1, CV_64FC1);
+    for (auto i = 0; i < numColumns; ++i) {
+        // want the centre (hence +0.5) of the ith column,
+        // when image is divided into numColumns parts of equal width
+        initialMeans.at<double>(i, 0) = (i + 0.5) / numColumns * rectsImg.cols;
+    }
+    if (!batchMode) {
+        for (auto i = 0; i < numColumns; ++i) {
+            printf("Mixture %d initial mean: %f\n", i, initialMeans.at<double>(i, 0));
+        }
+    }
+    // cluster samples around initial means
+    // don't provide initial covariance matrix estimates, or weights
+    /*
+     * signature:
+     * trainE(InputArray samples, InputArray means0, InputArray covs0, InputArray weights0,
+     *     OutputArray logLikelihoods, OutputArray labels, OutputArray probs)
+     */
+    Mat bestLabels;
+    emAlg->trainE(wordBBcentroidX, initialMeans, cv::noArray(), cv::noArray(), cv::noArray(), bestLabels);
+
+    Mat means = emAlg->getMeans();
+    Mat weights = emAlg->getWeights();
+    std::vector<Mat> covs;
+    covs.reserve(numColumns);
+    emAlg->getCovs(covs);
+    if (!batchMode) {
+        for (auto k = 0; k < numColumns; ++k) {
+            printf("Mixture %d: weight=%f mean=%f variance=%f\n", k, weights.at<double>(k), means.at<double>(k)
+                   , covs[k].at<double>(0));
+        }
+#ifndef REFERENCE_ANDROID
+        // plot density
+        Mat density(rectsImg.cols, 1, CV_64FC1, 0.0);
+        Mat samples(rectsImg.cols, 1, CV_64FC1);
+        for (int i = 0; i < rectsImg.cols; ++i) {
+            samples.at<double>(i) = (double) i;
+        }
+        /*
+         * calculate density using vector operations
+         * density(i) =
+         *  sum_{k= 0 to numColumns - 1} of
+         *      weights[k] * sqrt/(2*pi*variance[k] * exp(-0.5/variance[k] * (samples(i) - means[k])^2)
+         */
+        // 1/sqrt(2) * 2/sqrt(pi) / 2
+        constexpr auto M_1_SQRT_2PI = M_SQRT1_2*M_2_SQRTPI/2.0;
+        for (auto k = 0; k < numColumns; ++k) {
+            auto variance = covs[k].at<double>(0);
+            auto constant = weights.at<double>(k) * M_1_SQRT_2PI / sqrt(variance);
+            Mat meansSubtracted = samples - means.at<double>(k);
+            Mat scaled = meansSubtracted.mul(meansSubtracted, -0.5/variance);
+            Mat exponentiated;
+            cv::exp(scaled, exponentiated);
+            density += constant*exponentiated;
+        }
+
+        // now plot it
+        cv::Ptr<cv::plot::Plot2d> plotDensity = makePlot(density, &rectsImg, cv::Scalar(255, 255, 0));
+        Mat plotResultDensity;
+        plotDensity->render(plotResultDensity);
+        showImage(0.5 * plotResultDensity + 0.5 * rectsImg, "Fitted mixture model for column distribution");
+#endif // REFERENCE_ANDROID
+    }
+
+    /*
+    //Mat outputCentres;
+    cv::kmeans(wordBBcentroidX, numColumns, bestLabels, termCriteria, 3, cv::KMEANS_PP_CENTERS, outputCentres);
+    */
+    // apply column labels
+    {
+        /* Labels might not be in order of left-to-right columns, so we need to create this mapping */
+        vector<int> labelOrder(numColumns, 0);
+        std::iota(labelOrder.begin(), labelOrder.end(), 0);
+        std::sort(labelOrder.begin(), labelOrder.end(), [&means](int a, int b) -> bool {
+            return means.at<double>(a) < means.at<double>(b);
+        });
+        const auto firstLabel = labelOrder.cbegin();
+        const auto lastLabel = labelOrder.cend();
+        for (auto i = 0; i < (int) words.size(); ++i) {
+            auto currentLabel = bestLabels.at<int>(i);
+            // TODO could be more efficient than std::find every time but it probably doesn't matter
+            // find which column the label corresponds to
+            // std::find returns an iterator, so the corresponding index is found by 'subtracting' the begin() iterator
+            auto column = static_cast<unsigned int>(std::find(firstLabel, lastLabel, currentLabel) - firstLabel);
+            words[i].setCol(column);
+        }
+    }
+}
+
+static void doOcr(const Mat& imageForOcr, tesseract::TessBaseAPI& tesseractAPI, vector<wordBB> & allWordBBs) {
+    auto bytes_per_line = static_cast<int>(imageForOcr.step1() * imageForOcr.elemSize());
+    tesseractAPI.SetImage(imageForOcr.data, imageForOcr.cols, imageForOcr.rows, /*bytes_per_pixel=*/1, bytes_per_line);
+    tesseractAPI.SetSourceResolution(300);
+
+    for (wordBB &w : allWordBBs) {
+        /*
+        Mat tessImage;
+        w.text = getCleanedText(tesseractAPI, w, tessImage);
+        showImage(tessImage, "OCR for wordBB");
+        /*/
+        w.setText(getCleanedText(tesseractAPI, w));
+        /**/
+    }
+}
+

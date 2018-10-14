@@ -19,7 +19,7 @@ using std::vector;
 using cv::Mat;
 
 
-void drawCC(Mat& img, const CComponent& cc, cv::Scalar colour) {
+void drawCC(Mat& img, const CC& cc, cv::Scalar colour) {
     //int area = stats.at<int>(which, cv::CC_STAT_AREA);
     //int centroidX = static_cast<int>(centroids.at<double>(which, 0));
     //int centroidY = static_cast<int>(centroids.at<double>(which, 1));
@@ -67,7 +67,7 @@ void showCentroidClusters(const Mat& image, const vector<ccCluster>& clustersByC
     for (const ccCluster &c : clustersByCentroid) {
         // pick a pseudorandom nice colour
         cv::Scalar colour = pseudoRandomColour(13 * c.getSize(), ((int)c.getMode()[0]) % 157);
-        for (const CComponent& cc : c.getData()) {
+        for (const CC& cc : c.getData()) {
             drawCC(clusteredCCs, cc, colour);
         }
     }
@@ -126,7 +126,7 @@ void showRowBounds(const Mat& image, const vector<ccCluster>& clustersByCentroid
         int maxY = 0;
         int clusterSize = c.getSize();
         maxSize = std::max(clusterSize, maxSize);
-        for (const CComponent& cc : c.getData()) {
+        for (const CC& cc : c.getData()) {
             minY = std::min(minY, cc.top());
             maxY = std::max(maxY, cc.bottom());
         }

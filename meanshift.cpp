@@ -3,17 +3,18 @@
  * Taken (and modified) from https://github.com/mattnedrich/MeanShift_cpp (licensed under MIT license)
  */
 
-#include <math.h>
+#include <cmath>
 #include "meanshift.h"
 
 #define CLUSTER_EPSILON 0.5
 
 namespace meanShift {
+    using std::vector;
+
     double euclidean_distance_sqr(const position &a, const position &b) {
         double total = 0;
         for (unsigned i = 0; i < a.size(); i++) {
-            const double temp = (a[i] - b[i]);
-            total += temp * temp;
+            total += (a[i] - b[i])*(a[i] - b[i]);
         }
         return total;
     }
@@ -28,7 +29,7 @@ namespace meanShift {
     }
 
     template <typename T>
-    void shift_point(const Point<T> &p, const std::vector<Point<T>> &points, double kernel_bandwidth, Point<T> &shifted_point, kernelFunc k) {
+    void shift_point(const Point<T> &p, const vector<Point<T>> &points, double kernel_bandwidth, Point<T> &shifted_point, kernelFunc k) {
         shifted_point = p;
         if (points.size() == 1 || kernel_bandwidth == 0) {
             // nothing should be done
@@ -60,10 +61,10 @@ namespace meanShift {
 
 
     template <typename T>
-    std::vector<Point<T>> meanshift(const std::vector<Point<T>> &points, double bandwidth, kernelFunc kernel, double EPSILON = 0.00001) {
-        std::vector<Point<T>> shifted_points = points;
+    vector<Point<T>> meanshift(const vector<Point<T>> &points, double bandwidth, kernelFunc kernel, double EPSILON = 0.00001) {
+        vector<Point<T>> shifted_points = points;
         const auto EPSILON_SQR = EPSILON * EPSILON;
-        std::vector<bool> stop_moving(points.size(), false);
+        vector<bool> stop_moving(points.size(), false);
         double max_shift_distance;
         Point<T> point_new;
         do {
@@ -88,8 +89,8 @@ namespace meanShift {
     }
 
     template <typename T>
-    ClusterList<T> makeCluster(const std::vector<Point<T>> &points, const std::vector<Point<T>> &shifted_points) {
-        ClusterList<T> clusters;
+    vector<Cluster<T>> makeCluster(const vector<Point<T>> &points, const vector<Point<T>> &shifted_points) {
+        vector<Cluster<T>>clusters;
         for (unsigned i = 0; i < shifted_points.size(); i++) {
             unsigned c = 0;
             // find cluster to add current point to
@@ -106,14 +107,13 @@ namespace meanShift {
     }
 
     template <typename T>
-    ClusterList<T> cluster(const std::vector<Point<T>> &points, double kernel_bandwidth, kernelFunc k) {
+    vector<Cluster<T>> cluster(const vector<Point<T>> &points, double kernel_bandwidth, kernelFunc k) {
         auto shifted_points = meanshift(points, kernel_bandwidth, k);
         auto cluster = makeCluster(points, shifted_points);
-        // sort by cluster getSize, in *descending* order
         return cluster;
     }
 
     // need to instantiate types that will be used
-    template ClusterList<CComponent> meanShift::cluster<CComponent>(const std::vector<Point<CComponent>>&, double, kernelFunc);
+    template vector<Cluster<CC>> meanShift::cluster<CC>(const vector<Point<CC>>&, double, kernelFunc);
 }
 
