@@ -168,8 +168,8 @@ Table tableExtract(const Mat &image, tesseract::TessBaseAPI& tesseractAPI, vecto
         if (!rectsPerRow.empty()) {
             std::sort(rectsPerRow.begin(), rectsPerRow.end());
             auto n = rectsPerRow.size(); // guaranteed n > 0
-            minRectsPerRow = rectsPerRow[n/4];
-            maxRectsPerRow = rectsPerRow[n*4/5];
+            minRectsPerRow = rectsPerRow.at(n/4);
+            maxRectsPerRow = rectsPerRow.at(n*4/5);
         } else {
             minRectsPerRow = 0;
             maxRectsPerRow = (size_t) -1; // largest size
@@ -382,7 +382,7 @@ vector<vector<wordBB>> findWords(const Mat &binarised, vector<progressImg>& prog
         // sort by increasing mode (Y Coordinate)
         using ccCluster = meanShift::Cluster<CC>;
         std::sort(ccClusters.begin(), ccClusters.end(), [](const ccCluster& c1, const ccCluster& c2) -> bool {
-            return c1.getMode()[0] < c2.getMode()[0];
+            return c1.getMode().at(0) < c2.getMode().at(0);
         });
     }
     /*
@@ -574,7 +574,7 @@ static void classifyColumns(vector<wordBB>& words, int numColumns, const Mat& re
     }
     Mat wordBBcentroidX((int) words.size(), 1, CV_64FC1);
     for (unsigned int i = 0; i < words.size(); ++i) {
-        wordBBcentroidX.at<double>(i, 0) = words[i].boxCentreX();
+        wordBBcentroidX.at<double>(i, 0) = words.at(i).boxCentreX();
     }
 
     if (!batchMode) {
@@ -626,7 +626,7 @@ static void classifyColumns(vector<wordBB>& words, int numColumns, const Mat& re
     if (!batchMode) {
         for (auto k = 0; k < numColumns; ++k) {
             printf("Mixture %d: weight=%f mean=%f variance=%f\n", k, weights.at<double>(k), means.at<double>(k)
-                   , covs[k].at<double>(0));
+                   , covs.at(k).at<double>(0));
         }
 #ifndef REFERENCE_ANDROID
         // plot density
@@ -644,7 +644,7 @@ static void classifyColumns(vector<wordBB>& words, int numColumns, const Mat& re
         // 1/sqrt(2) * 2/sqrt(pi) / 2
         constexpr auto M_1_SQRT_2PI = M_SQRT1_2*M_2_SQRTPI/2.0;
         for (auto k = 0; k < numColumns; ++k) {
-            auto variance = covs[k].at<double>(0);
+            auto variance = covs.at(k).at<double>(0);
             auto constant = weights.at<double>(k) * M_1_SQRT_2PI / sqrt(variance);
             Mat meansSubtracted = samples - means.at<double>(k);
             Mat scaled = meansSubtracted.mul(meansSubtracted, -0.5/variance);
@@ -681,7 +681,7 @@ static void classifyColumns(vector<wordBB>& words, int numColumns, const Mat& re
             // find which column the label corresponds to
             // std::find returns an iterator, so the corresponding index is found by 'subtracting' the begin() iterator
             auto column = static_cast<unsigned int>(std::find(firstLabel, lastLabel, currentLabel) - firstLabel);
-            words[i].setCol(column);
+            words.at(i).setCol(column);
         }
     }
 }

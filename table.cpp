@@ -70,7 +70,7 @@ size_t Table::cols() const {
     return _columns;
 }
 
-string Table::getText(size_t row, size_t col) const {
+string Table::textAt(size_t row, size_t col) const {
     checkCol(col);
     checkRow(row);
 

@@ -56,7 +56,6 @@ auto levenshtein(std::string a, std::string b) -> size_t {
     // since they won't occur very often anyway, and the strings aren't too long
 
 	// make b the longer string
-
 	if (a.size() > b.size()) {
 	    std::swap(a, b);
 	}
@@ -87,11 +86,13 @@ auto levenshtein(std::string a, std::string b) -> size_t {
  * 'correctness' fraction using the Levenshtein distance function
  */
 double stringSimilarity(const std::string &a, const std::string &b) {
-	if (a.empty() || b.empty()) {
-		return a.empty() && b.empty() ? 1.0 : 0.0;
+	if (a.empty() && b.empty()) {
+		return 1.0;
+	} else if (a.empty() || b.empty()) {
+		return 0.0;
+	} else {
+		return 1.0 - (double) levenshtein(a, b)/std::max(a.size(), b.size());
 	}
-    auto maxLevDistance = std::max(a.size(), b.size());
-    return 1.0 - levenshtein(a, b)/(double)maxLevDistance;
 }
 
 /*
@@ -100,10 +101,13 @@ double stringSimilarity(const std::string &a, const std::string &b) {
  * Minimum score is still zero
  */
 double asymStringSimilarity(const std::string &a, const std::string &b) {
-	if (a.empty() || b.empty()) {
-		return a.empty() && b.empty() ? 1.0 : 0.0;
+	if (a.empty() && b.empty()) {
+		return 1.0;
+	} else if (a.empty() || b.empty()) {
+		return 0.0;
+	} else {
+		return std::max(0.0, 1.0 - (double) levenshtein(a, b)/b.size());
 	}
-	return std::max(0.0, 1.0 - levenshtein(a, b)/(double)b.size());
 }
 
 #endif // LEVENSHTEIN_H

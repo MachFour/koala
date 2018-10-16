@@ -21,7 +21,7 @@ public:
     size_t rows() const;
     size_t cols() const;
 
-    std::string getText(size_t row, size_t col) const;
+    std::string textAt(size_t row, size_t col) const;
     std::string parseableString(const char * colSep = "\f") const;
     std::string printableString(unsigned int minColumnWidth) const;
 
