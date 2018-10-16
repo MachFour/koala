@@ -55,7 +55,7 @@ comparisonResult compareTable(const Table& actual, const Table& expected) {
             for (auto j = s0; j < rowsE; ++j) {
                 auto strActual = actual.textAt(i, 0);
                 auto strExpected = expected.textAt(j, 0);
-                scoresForKeyI.at(i) = stringSimilarity(strActual, strExpected);
+                scoresForKeyI.at(j) = stringSimilarity(strActual, strExpected);
                 matchings.emplace_back(idxPair{i, j});
             }
             matchScore.push_back(scoresForKeyI);
