@@ -14,6 +14,7 @@
 #include <iostream>
 #include <algorithm>
 #include <fstream>
+#include <ios>
 
 using std::vector;
 using cv::Mat;
@@ -60,18 +61,18 @@ int findMedian(vector<int> numbers) {
     }
 }
 
-void showCentroidClusters(const Mat& image, const vector<ccCluster>& clustersByCentroid, const std::string& title) {
+Mat drawCentroidClusters(const Mat& image, const vector<ccCluster>& clustersByCentroid) {
     // now draw on the clustered CCs
     Mat clusteredCCs;
     cv::cvtColor(image, clusteredCCs, CV_GRAY2BGR);
     for (const ccCluster &c : clustersByCentroid) {
         // pick a pseudorandom nice colour
-        cv::Scalar colour = pseudoRandomColour(13 * c.getSize(), ((int)c.getMode()[0]) % 157);
+        cv::Scalar colour = pseudoRandomColour((int)(13 * c.getSize()), ((int)c.getMode()[0]) % 157);
         for (const CC& cc : c.getData()) {
             drawCC(clusteredCCs, cc, colour);
         }
     }
-    showImage(clusteredCCs, title);
+    return clusteredCCs;
 }
 
 // input must be either CV_8U, CV_32F or CV_64F
@@ -124,7 +125,7 @@ void showRowBounds(const Mat& image, const vector<ccCluster>& clustersByCentroid
     for (const ccCluster &c : clustersByCentroid) {
         int minY = image.rows;
         int maxY = 0;
-        int clusterSize = c.getSize();
+        int clusterSize = (int) c.getSize();
         maxSize = std::max(clusterSize, maxSize);
         for (const CC& cc : c.getData()) {
             minY = std::min(minY, cc.top());
@@ -176,11 +177,18 @@ std::string readFile(const std::string &filename) {
     // initially seek to end of file to get its position
     std::ifstream ifs(filename, std::ios::binary | std::ios::ate);
     if (!ifs.is_open()) {
-        printf("Could not open file with name %s\n", filename.c_str());
+        fprintf(stderr, "Could not open file with name %s\n", filename.c_str());
         return "";
     }
     // XXX this may not always be an accurate indicator of the file size!
-    auto size = ifs.tellg();
+    std::fstream::pos_type end = ifs.tellg();
+    if (end == std::fstream::pos_type(-1)) {
+        // error
+        fprintf(stderr, "readFile(): error end-of-file position: %s\n", filename.c_str());
+        return "";
+    }
+
+    auto size = static_cast<size_t>(end);
 #ifdef REFERENCE_ANDROID
 #warning "tellg() may not work as a size indication on Android"
 #endif

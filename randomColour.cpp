@@ -7,10 +7,10 @@
 cv::Scalar pseudoRandomColour(int a, int b, int c, int d, int minVal) {
     int modVal = 255-minVal;
     int multiplier = 31;
-    int red = minVal + (multiplier * a * b * c % modVal);
-    int green = minVal + (multiplier * b * c * d % modVal);
-    int blue = minVal + (multiplier * d * a * b % modVal);
-    return cv::Scalar(red, green, blue);
+    auto red   = static_cast<double>(minVal + (multiplier * a * b * c % modVal));
+    auto green = static_cast<double>(minVal + (multiplier * b * c * d % modVal));
+    auto blue  = static_cast<double>(minVal + (multiplier * d * a * b % modVal));
+    return {red, green, blue};
 }
 
 cv::Scalar pseudoRandomColour(int a, int b, int minVal) {
@@ -18,5 +18,5 @@ cv::Scalar pseudoRandomColour(int a, int b, int minVal) {
 }
 
 cv::Scalar pseudoRandomColour(int a) {
-    return pseudoRandomColour(1+a, 10 + a, 50+a, 200+a);
+    return pseudoRandomColour(1 + a, 11 + 2*a, 51 + 3*a, 479 + 4*a);
 }

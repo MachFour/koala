@@ -7,44 +7,43 @@
 
 #include <vector>
 #include <string>
-#include <iterator>
-#include <algorithm>
-#include <stdexcept>
 
 class Table {
-    using string = std::string;
-    using stringVector = std::vector<std::string>;
+
+private:
+    // steal rows object from caller
+    Table(size_t columns, std::vector<std::vector<std::string>> rows) : _columns(columns), _rows(std::move(rows)) { }
 
 public:
-    explicit Table(int columns) : columns(columns) {
-        if (columns < 0) {
-            throw std::invalid_argument("Number of columns must be positive");
-        }
-    }
+    explicit Table(size_t columns) : _columns(columns) { }
+    explicit Table() : _columns(0) { }
 
+    size_t rows() const;
+    size_t cols() const;
+
+    std::string getText(size_t row, size_t col) const;
     std::string parseableString(const char * colSep = "\f") const;
+    std::string printableString(unsigned int minColumnWidth) const;
 
-    string printableString(unsigned int minColumnWidth) const;
-    int numRows() const;
-    int numCols() const;
+    const std::vector<std::string>& getRow(size_t row) const;
 
-    // returns empty string if indices are out of range
-    string getText(int row, int col) const;
-    const stringVector& getRow(int row) const;
-
-
+    void setText(size_t row, size_t col, const std::string &text);
     void addRow();
-    void setColumnText(int row, int col, const std::string& text);
 
-    static Table parseFromString(string tableString, string columnSep="\f");
+    static Table parseFromString(std::string tableString, std::string columnSep="\f");
+    /*
+     * Helper function to do appropriate casting
+     * returns t1.numCols() - t2.cols()
+     */
+    static int columnDifference(const Table& t1, const Table& t2);
 
 private:
     // bounds checking
-    void checkCol(int col) const;
-    void checkRow(int row) const;
+    void checkCol(size_t col) const;
+    void checkRow(size_t row) const;
 
-    int columns;
-    std::vector<stringVector> rows;
+    size_t _columns;
+    std::vector<std::vector<std::string>> _rows;
 };
 
 #endif //REFERENCE_TABLE_H

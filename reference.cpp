@@ -111,14 +111,14 @@ static bool isPlausibleWordBBSize(const wordBB& w, int imgW, int imgH) {
 /*
  * Stages of main processing
  */
-static Mat preprocess(const Mat&, bool);
-static vector<vector<wordBB>> findWords(const Mat&, bool);
-static int estimateNumberOfColumns(const vector<wordBB>& wordBBs, int width, const Mat& rects, bool batchMode);
-static void classifyColumns(std::vector<wordBB>&, int, const Mat& rects, bool batchMode=true);
+static Mat preprocess(const Mat&, vector<progressImg>&);
+static vector<vector<wordBB>> findWords(const Mat&, vector<progressImg>&);
+static int estimateNumberOfColumns(const vector<wordBB>& wordBBs, int width, const Mat& rects, vector<progressImg>&);
+static void classifyColumns(std::vector<wordBB>&, int, const Mat& rects, vector<progressImg>&, bool);
 static void doOcr(const Mat&, tesseract::TessBaseAPI&, vector<wordBB>&);
 
-Table tableExtract(const Mat &image, tesseract::TessBaseAPI& tesseractAPI, cv::Mat * wordBBImg, bool batchMode) {
 
+Table tableExtract(const Mat &image, tesseract::TessBaseAPI& tesseractAPI, vector<progressImg>& progressImages, bool batchMode) {
     Mat grey;
 #ifdef REFERENCE_ANDROID
     // android images are RGBA after decoding
@@ -129,7 +129,7 @@ Table tableExtract(const Mat &image, tesseract::TessBaseAPI& tesseractAPI, cv::M
     Mat grey8;
     grey.convertTo(grey8, CV_8UC1);
 
-    Mat preprocessed = preprocess(grey8, batchMode);
+    Mat preprocessed = preprocess(grey8, progressImages);
     Mat binarised;
     {
         // gaussian blur
@@ -139,17 +139,13 @@ Table tableExtract(const Mat &image, tesseract::TessBaseAPI& tesseractAPI, cv::M
         Mat blurred = floatToEightBit(blurredF);
         //cv::threshold(blurred, binarised, 0, 255, cv::THRESH_BINARY | cv::THRESH_OTSU);
         cv::threshold(preprocessed, binarised, 0, 255, cv::THRESH_BINARY | cv::THRESH_OTSU);
-        if (!batchMode) {
-            showImage(binarised, "binarised");
-        }
+        progressImages.emplace_back(progressImg{binarised, "binarised"});
     }
 
-    vector<vector<wordBB>> wordsByRow = findWords(binarised, batchMode);
+    vector<vector<wordBB>> wordsByRow = findWords(binarised, progressImages);
 
     Mat rects = overlayWords(binarised, wordsByRow, false);
-    if (!batchMode) {
-        showImage(rects, "combined rects");
-    }
+    progressImages.emplace_back(progressImg{rects, "combined rects"});
 
     /*
      * find column separators as the vertical lines intersecting the least number of rectangles
@@ -208,13 +204,11 @@ Table tableExtract(const Mat &image, tesseract::TessBaseAPI& tesseractAPI, cv::M
 
     Mat allRowRects = overlayWords(binarised, allWordBBs, true);
     Mat columnRects = overlayWords(binarised, wordBBsforColumnInference, true);
-    if (!batchMode) {
-        showImage(allRowRects, "all combined WordBBs");
-        showImage(columnRects, "wordBBs for column Inference");
-    }
+    progressImages.emplace_back(progressImg{allRowRects, "all combined WordBBs"});
+    progressImages.emplace_back(progressImg{columnRects, "wordBBs for column Inference"});
 
-    int estimatedColumns = estimateNumberOfColumns(wordBBsforColumnInference, image.cols, columnRects, batchMode);
-    classifyColumns(allWordBBs, estimatedColumns, columnRects, batchMode);
+    int estimatedColumns = estimateNumberOfColumns(wordBBsforColumnInference, image.cols, columnRects, progressImages);
+    classifyColumns(allWordBBs, estimatedColumns, columnRects, progressImages, batchMode);
 
     // sort the wordBBs by row, then by column, then by x coordinate
     std::sort(allWordBBs.begin(), allWordBBs.end(), [](const wordBB &a, const wordBB &b) -> bool {
@@ -225,9 +219,7 @@ Table tableExtract(const Mat &image, tesseract::TessBaseAPI& tesseractAPI, cv::M
     });
 
     Mat classifiedWordBBs = overlayWords(binarised, allWordBBs, true);
-    if (!batchMode) {
-        showImage(classifiedWordBBs, "classified wordBBs");
-    }
+    progressImages.emplace_back(progressImg{classifiedWordBBs, "classified wordBBs"});
 
     vector<wordBB> combinedWordBBs;
     {
@@ -258,29 +250,25 @@ Table tableExtract(const Mat &image, tesseract::TessBaseAPI& tesseractAPI, cv::M
         }
     }
 
-    Mat finalWordBBs = overlayWords(binarised, combinedWordBBs, true);
-    if (!batchMode) {
-        showImage(finalWordBBs, "combinedWordBBs");
-    }
-    if (wordBBImg != nullptr) {
-        // save intermediate processing result
-        *wordBBImg = finalWordBBs;
-    }
+    Mat combinedWordsImg = overlayWords(binarised, combinedWordBBs, true);
+    progressImages.emplace_back(progressImg{combinedWordsImg, "final WordBBs"});
 
     // run OCR on the preprocessed image
     doOcr(invert(preprocessed), tesseractAPI, combinedWordBBs);
 
-    Table t(estimatedColumns);
+    Table t((size_t)estimatedColumns);
     // now we can assume there is only one wordBB per row and column
     for (const wordBB &w : combinedWordBBs) {
-        t.setColumnText(w.row(), w.col(), w.text());
+        auto r = static_cast<size_t>(w.row());
+        auto c = static_cast<size_t>(w.col());
+        t.setText(r, c, w.text());
     }
 
     // TODO Contour / line detection
     //showImage(binarised);
     return t;
 }
-static cv::Mat preprocess(const cv::Mat& grey8, bool batchMode) {
+static cv::Mat preprocess(const cv::Mat& grey8, vector<progressImg>& progressImages) {
     using cv::Mat;
 
     // do dumb threshold to figure out whether it's white on black or black on white text, and invert if necessary
@@ -320,12 +308,12 @@ static cv::Mat preprocess(const cv::Mat& grey8, bool batchMode) {
     Mat preprocessed;
     cv::subtract(textEnhanced, hLines, preprocessed, cv::noArray(), CV_8U);
     cv::subtract(preprocessed, vLines, preprocessed, cv::noArray(), CV_8U);
-    if (!batchMode) {
-        showImage(grey8, "image");
-        showImage(textEnhanced, "textEnhanced");
-        //showImage(hLines, "hlines");
-        //showImage(vLines, "vlines");
-        showImage(preprocessed, "preprocessed");
+    {
+        progressImages.emplace_back(progressImg{grey8, "image"});
+        progressImages.emplace_back(progressImg{textEnhanced, "textEnhanced"});
+        //progressImages.emplace_back(progressImg{hLines, "hlines"});
+        //progressImages.emplace_back(progressImg{vLines, "vlines"});
+        progressImages.emplace_back(progressImg{preprocessed, "preprocessed"});
     }
 
     return preprocessed;
@@ -339,7 +327,7 @@ static cv::Mat preprocess(const cv::Mat& grey8, bool batchMode) {
  *      in order to group them by row (and to a lesser extent, height)
  * 2. Find the largst
  */
-vector<vector<wordBB>> findWords(const Mat &binarised, bool batchMode) {
+vector<vector<wordBB>> findWords(const Mat &binarised, vector<progressImg>& progressImages) {
     Mat labels;
     // stats is a 5 x nLabels Mat containing left, top, width, height, and area for each component (+ background)
     Mat stats;
@@ -371,7 +359,8 @@ vector<vector<wordBB>> findWords(const Mat &binarised, bool batchMode) {
             yCentroids.emplace_back(meanShift::Point<CC>{cc, {cc.centroidY}});
         }
     }
-    if (!batchMode) {
+
+    {
         Mat allComponents = binarised.clone();
         Mat allowedComponents = binarised.clone();
         for (const auto &cc: allCCs) {
@@ -383,8 +372,8 @@ vector<vector<wordBB>> findWords(const Mat &binarised, bool batchMode) {
                 drawCC(allComponents, cc);
             }
         }
-        showImage(allComponents, "all CCs");
-        showImage(allowedComponents, "plausible CCs");
+        progressImages.emplace_back(progressImg{allComponents, "all CCs"});
+        progressImages.emplace_back(progressImg{allowedComponents, "plausible CCs"});
     }
 
     // TODO justify bandwidth parameter
@@ -442,9 +431,11 @@ vector<vector<wordBB>> findWords(const Mat &binarised, bool batchMode) {
         }
     }
 
-    if (!batchMode) {
-        showCentroidClusters(binarised, allClustersByCentroid, "all height clusters in row");
-        showCentroidClusters(binarised, clustersByCentroid, "largest height cluster in row");
+    {
+        Mat allHeightClustersImg = drawCentroidClusters(binarised, allClustersByCentroid);
+        Mat largestHeightClusterImg = drawCentroidClusters(binarised, clustersByCentroid);
+        progressImages.emplace_back(progressImg{allHeightClustersImg, "all height clusters in row"});
+        progressImages.emplace_back(progressImg{largestHeightClusterImg, "largest height cluster in row"});
     }
     //showRowBounds(binarised, clustersByCentroid);
 
@@ -487,7 +478,7 @@ vector<vector<wordBB>> findWords(const Mat &binarised, bool batchMode) {
     return rows;
 }
 
-static int estimateNumberOfColumns(const vector<wordBB>& wordBBs, int width, const Mat& rects, bool batchMode) {
+static int estimateNumberOfColumns(const vector<wordBB>& wordBBs, int width, const Mat& rects, vector<progressImg>& progressImages) {
     // this will count how many rects (from eligible rows) would be intersected by a cut at the given X coordinate
     Mat rectsCutByXCoord(width, 1, CV_64FC1, cv::Scalar(0.0));
     for (const auto& word: wordBBs) {
@@ -499,22 +490,20 @@ static int estimateNumberOfColumns(const vector<wordBB>& wordBBs, int width, con
     Mat rectCutDensity;
     {
         // have to make blur size odd
-        auto blurSize = width/8 + ((width/8) % 2 == 0);
+        auto blurSize = width / 8 + ((width / 8) % 2 == 0);
         // treat 'outside the image' as zero
         cv::GaussianBlur(rectsCutByXCoord, rectCutDensity, cv::Size(blurSize, blurSize), 0, 0, cv::BORDER_ISOLATED);
 
 #ifndef REFERENCE_ANDROID
         using cv::plot::Plot2d;
-        if (!batchMode) {
-            cv::Ptr<Plot2d> plotCounts = makePlot(rectsCutByXCoord, &rects);
-            cv::Ptr<Plot2d> plotSmoothedCounts = makePlot(rectCutDensity, &rects);
-            Mat plotResultCounts;
-            Mat plotResultSmoothedCounts;
-            plotCounts->render(plotResultCounts);
-            plotSmoothedCounts->render(plotResultSmoothedCounts);
-            showImage(0.5 * plotResultCounts + 0.5 * rects, "words cut by X coordinate");
-            showImage(0.5 * plotResultSmoothedCounts + 0.5 * rects, "smoothed count data");
-        }
+        cv::Ptr<Plot2d> plotCounts = makePlot(rectsCutByXCoord, &rects);
+        cv::Ptr<Plot2d> plotSmoothedCounts = makePlot(rectCutDensity, &rects);
+        Mat plotResultCounts;
+        Mat plotResultSmoothedCounts;
+        plotCounts->render(plotResultCounts);
+        plotSmoothedCounts->render(plotResultSmoothedCounts);
+        progressImages.emplace_back(progressImg{0.5 * plotResultCounts + 0.5 * rects, "words cut by X coordinate"});
+        progressImages.emplace_back(progressImg{0.5 * plotResultSmoothedCounts + 0.5 * rects, "smoothed count data"});
 #endif // REFERENCE_ANDROID
     }
 
@@ -547,36 +536,37 @@ static int estimateNumberOfColumns(const vector<wordBB>& wordBBs, int width, con
             }
         }
         estimatedColumns = peaks;
+        /*
         if (!batchMode) {
             printf("Estimated columns by sign counting: %u\n", estimatedColumns);
         }
+         */
 #ifndef REFERENCE_ANDROID
         using cv::plot::Plot2d;
-        if (!batchMode) {
-            cv::Ptr<Plot2d> plotThreshold = makePlot(rectCutDensity, &rects);
-            Mat plotResultThresh;
-            {
-                plotThreshold->render(plotResultThresh);
-                // draw q3 as a line on the image
-                // need to calculate its y coordinate, given that the plot's original height was equal to
-                // max(smoothedCutRectDensity), but was rescaled to have height equal to the original image
-                double maxVal;
-                cv::minMaxIdx(rectCutDensity, nullptr, &maxVal);
-                // subtract from 1.0 to get threshold referred to bottom of image, not top
-                auto q75YCoord = static_cast<int>((1.0 - q75 / maxVal) * plotResultThresh.rows);
-                auto q60YCoord = static_cast<int>((1.0 - q60 / maxVal) * plotResultThresh.rows);
-                auto red = cv::Scalar(0, 0, 255); // B, G, R
-                cv::rectangle(plotResultThresh, cv::Rect(0, q75YCoord, plotResultThresh.cols - 1, 1), red, 5);
-                cv::rectangle(plotResultThresh, cv::Rect(0, q60YCoord, plotResultThresh.cols - 1, 1), red, 5);
-            }
-            showImage(0.5 * plotResultThresh + 0.5 * rects);
+        cv::Ptr<Plot2d> plotThreshold = makePlot(rectCutDensity, &rects);
+        Mat plotResultThresh;
+        {
+            plotThreshold->render(plotResultThresh);
+            // draw q3 as a line on the image
+            // need to calculate its y coordinate, given that the plot's original height was equal to
+            // max(smoothedCutRectDensity), but was rescaled to have height equal to the original image
+            double maxVal;
+            cv::minMaxIdx(rectCutDensity, nullptr, &maxVal);
+            // subtract from 1.0 to get threshold referred to bottom of image, not top
+            auto q75YCoord = static_cast<int>((1.0 - q75 / maxVal) * plotResultThresh.rows);
+            auto q60YCoord = static_cast<int>((1.0 - q60 / maxVal) * plotResultThresh.rows);
+            auto red = cv::Scalar(0, 0, 255); // B, G, R
+            cv::rectangle(plotResultThresh, cv::Rect(0, q75YCoord, plotResultThresh.cols - 1, 1), red, 5);
+            cv::rectangle(plotResultThresh, cv::Rect(0, q60YCoord, plotResultThresh.cols - 1, 1), red, 5);
         }
-#endif // REFERENCE_ANDROID
+        progressImages.emplace_back(progressImg{0.5 * plotResultThresh + 0.5 * rects, "column counting thresholds"});
     }
+#endif // REFERENCE_ANDROID
+
     return estimatedColumns;
 }
 
-static void classifyColumns(vector<wordBB>& words, int numColumns, const Mat& rectsImg, bool batchMode) {
+static void classifyColumns(vector<wordBB>& words, int numColumns, const Mat& rectsImg, vector<progressImg>& progressImages, bool batchMode) {
     // now put horizontal centres of all wordBBs into a Mat and run kmeans
     if (words.empty()) {
         fprintf(stderr, "classifyColumns(): warning: words list was empty");
@@ -631,7 +621,7 @@ static void classifyColumns(vector<wordBB>& words, int numColumns, const Mat& re
     Mat means = emAlg->getMeans();
     Mat weights = emAlg->getWeights();
     std::vector<Mat> covs;
-    covs.reserve(numColumns);
+    covs.reserve(static_cast<size_t>(numColumns));
     emAlg->getCovs(covs);
     if (!batchMode) {
         for (auto k = 0; k < numColumns; ++k) {
@@ -667,7 +657,7 @@ static void classifyColumns(vector<wordBB>& words, int numColumns, const Mat& re
         cv::Ptr<cv::plot::Plot2d> plotDensity = makePlot(density, &rectsImg, cv::Scalar(255, 255, 0));
         Mat plotResultDensity;
         plotDensity->render(plotResultDensity);
-        showImage(0.5 * plotResultDensity + 0.5 * rectsImg, "Fitted mixture model for column distribution");
+        progressImages.emplace_back(progressImg{0.5 * plotResultDensity + 0.5 * rectsImg, "Fitted mixture model for column distribution"});
 #endif // REFERENCE_ANDROID
     }
 

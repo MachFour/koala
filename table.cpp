@@ -10,27 +10,21 @@
 #include <numeric>
 #include <algorithm>
 
-using string = std::string;
-using stringVector = std::vector<std::string>;
+using std::string;
+using std::vector;
 
-/* Utility functions for this file */
-static unsigned int rectifiedDifference(int a, int b);
-static stringVector split(const string& test, const string& delim);
-
-template <typename T>
-static auto max(T x, T y) -> T;
+static vector<string> split(const string& test, const string& delim);
 
 // adapted from JDługosz's answer at
 // https://codereview.stackexchange.com/questions/193203/splitting-stdstring-based-on-delimiter-using-only-find-and-substr
 
-void Table::checkCol(int col) const {
-    if (col < 0 || col >= columns) {
+void Table::checkCol(size_t col) const {
+    if (col >= cols()) {
         throw std::invalid_argument("column index out of range");
     }
 }
-
-void Table::checkRow(int row) const {
-    if (row < 0 || row >= numRows()) {
+void Table::checkRow(size_t row) const {
+    if (row >= rows()) {
         throw std::invalid_argument("row index out of range");
     }
 }
@@ -39,7 +33,7 @@ void Table::checkRow(int row) const {
 std::string Table::parseableString(const char * colSep) const {
     // takes into account padding characters
     std::string outStr;
-    for (const stringVector& column : rows) {
+    for (const vector<string>& column : _rows) {
         for (const std::string& cell : column) {
             outStr.append(cell);
             outStr.append(colSep);
@@ -51,97 +45,97 @@ std::string Table::parseableString(const char * colSep) const {
 }
 
 string Table::printableString(unsigned int minColumnWidth) const {
-    string outStr("\n\n");
+    string outStr;
+    outStr.reserve(minColumnWidth* cols()* rows());
     // takes into account padding characters
-    int realMinColWidth = minColumnWidth - 2;
-    for (const stringVector& column : rows) {
-        for (const string& cell : column) {
-            outStr.append(cell);
-            auto fillChars = rectifiedDifference(realMinColWidth, (int) cell.length());
+    const int realMinColWidth = minColumnWidth - 2;
+    for (const auto& column : _rows) {
+        for (const auto& cellText : column) {
+            outStr.append(cellText);
+            auto fillChars = static_cast<size_t>(std::max(0, realMinColWidth - (int) cellText.length()));
             outStr.append(fillChars, ' ');
             outStr.append("| ");
         }
         outStr.append("\n");
     }
+    outStr.shrink_to_fit();
     return outStr;
 }
 
-int Table::numRows() const {
-    return static_cast<int>(rows.size());
+size_t Table::rows() const {
+    return _rows.size();
 }
 
-int Table::numCols() const {
-    return columns;
+size_t Table::cols() const {
+    return _columns;
 }
 
-// returns empty string if indices are out of range
-string Table::getText(int row, int col) const {
+string Table::getText(size_t row, size_t col) const {
     checkCol(col);
     checkRow(row);
 
-    return rows[row][col];
+    return _rows[row][col];
 }
 
-const stringVector& Table::getRow(int row) const {
+const vector<string>& Table::getRow(size_t row) const {
     checkRow(row);
 
-    return rows[row];
+    return _rows[row];
 }
 
 void Table::addRow() {
-    rows.emplace_back(stringVector((size_t)columns));
+    _rows.emplace_back(vector<string>((size_t)_columns));
 }
-void Table::setColumnText(int row, int col, const std::string& text) {
+void Table::setText(size_t row, size_t col, const std::string &text) {
     checkCol(col);
 
-    auto rowSize = static_cast<size_t>(row);
-    while (rowSize >= rows.size()) {
+    while (row >= _rows.size()) {
         addRow();
     }
-    rows[row][col] = text;
+    _rows[row][col] = text;
 }
 
 Table Table::parseFromString(string tableString, string columnSep) {
-    stringVector rowStrings = split(tableString, "\n");
-    std::vector<stringVector> columnSplits;
-    columnSplits.reserve(rowStrings.size());
+    vector<string> rowStrings = split(tableString, "\n");
+    vector<vector<string>> rows;
+    rows.reserve(rowStrings.size());
 
-    int maxColumns = 0;
+    size_t maxColumns = 0;
     for (const string& rowString : rowStrings) {
         if (rowString.find(columnSep) == std::string::npos) {
             // no column separators so it's probably garbage; ignore it
             continue;
         }
-        stringVector cells = split(rowString, columnSep);
-        maxColumns = max(maxColumns, (int)cells.size());
-        columnSplits.push_back(cells);
+        vector<string> columns = split(rowString, columnSep);
+        maxColumns = std::max(maxColumns, columns.size());
+        rows.push_back(columns);
     }
 
-    Table t(maxColumns);
-    t.rows = columnSplits;
-    return t;
+    // ensure all rows have the same number of columns
+    for (auto& row : rows) {
+        row.resize(maxColumns);
+    }
+    rows.shrink_to_fit();
+
+    // donate rows to table
+    return Table(maxColumns, rows);
 }
 
-static unsigned int rectifiedDifference(int a, int b) {
-    return a - b <= 0 ? 0 : (unsigned int)(a - b);
-}
-
-template <typename T>
-static auto max(T x, T y) -> T {
-    return x > y ? x : y;
+int Table::columnDifference(const Table &t1, const Table &t2) {
+    return static_cast<int>(t1.cols()) - static_cast<int>(t2.cols());
 }
 
 // adapted from JDługosz's answer at
 // https://codereview.stackexchange.com/questions/193203/splitting-stdstring-based-on-delimiter-using-only-find-and-substr
 
-static stringVector split(const string& test, const string& delim) {
+static vector<string> split(const string& test, const string& delim) {
     auto nextChar = test.cbegin();
     const auto stringEnd = test.cend();
     const auto delimStart = delim.cbegin();
     const auto delimEnd = delim.cend();
     const auto delimLength = delim.length();
 
-    stringVector splitStrings;
+    vector<string> splitStrings;
 
     for (;;) {
         auto currentTokenEnd = std::search(nextChar, stringEnd, delimStart, delimEnd);

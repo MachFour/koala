@@ -89,10 +89,13 @@ int main(int argc, char ** argv) {
         return 1;
     }
 
-    cv::Mat clusteredWords;
-    Table outTable = tableExtract(image, tesseractAPI, &clusteredWords, batchMode);
-    if (!batchMode && !clusteredWords.empty()) {
-        showImage(clusteredWords);
+    std::vector<progressImg> progressImages;
+    Table outTable = tableExtract(image, tesseractAPI, progressImages, batchMode);
+    // second check is only needed if we return early from tableExctract
+    if (!batchMode) {
+        for (const auto& progressImage : progressImages) {
+            showImage(progressImage.first, progressImage.second);
+        }
     }
 
     tesseractAPI.End();
@@ -112,14 +115,14 @@ int main(int argc, char ** argv) {
         }
     }
     if (!batchMode) {
-        std::cout << outTable.printableString(30);
+        std::cout << outTable.printableString(25);
     }
 
     if (doTest) {
         std::string testOutputPath = doOutput ? outPrefix.append(".test") : "";
         auto name = basename(inFile).c_str();
         auto s = doTableComparison(outTable, truthFile, testOutputPath);
-        printf("%s %.3f %.3f %+d\n", name, s.keyScore, s.valScore, s.actualCols - s.expectedCols);
+        printf("%s %.3f %.3f %+d\n", name, s.keyScore, s.valScore, s.colDiff);
     }
 
 }

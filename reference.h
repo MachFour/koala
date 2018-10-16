@@ -22,9 +22,11 @@ const static int STDDEV_WIN = 32;
 const static cv::Size STDDEV_WIN_SIZE = cv::Size(STDDEV_WIN, STDDEV_WIN);
 const static double VARIANCE_THRESHOLD = 0.1;
 
+// pair of Mat and title
+using progressImg = std::pair<cv::Mat, std::string>;
 /*
  * what we're all here for
  */
-Table tableExtract(const cv::Mat &img, tesseract::TessBaseAPI& tessApi, cv::Mat * wordBBImg = nullptr, bool batchMode = true);
+Table tableExtract(const cv::Mat &img, tesseract::TessBaseAPI& tessApi, std::vector<progressImg>&, bool batchMode = true);
 
 #endif //REFERENCE_H
