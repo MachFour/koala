@@ -108,7 +108,7 @@ int main(int argc, char ** argv) {
         // ::tolower uses 'tolower' function from outermost namespace
         // std::transform(outString.begin(), outString.end(), outString.begin(), ::tolower);
         if (tableOutput.is_open()) {
-            tableOutput << outTable.parseableString(",");
+            tableOutput << outTable.printableString(25);
             tableOutput.close();
         } else {
             fprintf(stderr, "could not open output file for csv writing: %s\n", tableOutputPath.c_str());

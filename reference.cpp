@@ -560,8 +560,8 @@ static int estimateNumberOfColumns(const vector<wordBB>& wordBBs, int width, con
             cv::rectangle(plotResultThresh, cv::Rect(0, q60YCoord, plotResultThresh.cols - 1, 1), red, 5);
         }
         progressImages.emplace_back(progressImg{0.5 * plotResultThresh + 0.5 * rects, "column counting thresholds"});
-    }
 #endif // REFERENCE_ANDROID
+    }
 
     return estimatedColumns;
 }

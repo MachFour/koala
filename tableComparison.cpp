@@ -159,17 +159,18 @@ comparisonResult doTableComparison(const Table& test, const std::string& truthFi
         using std::endl;
         if (testOutFile.is_open()) {
             testOutFile << endl;
-            testOutFile << "**** Ground truth table comparison: ****" << endl;
-            testOutFile << "Ground truth table:" << endl;
-            testOutFile << trueTable.printableString(25) << endl;
-            testOutFile << endl << endl;
-            testOutFile << "Actual table:" << endl;
+            testOutFile << "** Algorithm detected table: **" << endl;
+            testOutFile << endl;
             testOutFile << test.printableString(25) << endl;
-            testOutFile << endl << endl;
-            testOutFile << "Comparison scores:" << endl;
-            testOutFile << "Average key column accuracy: " << 100*result.keyScore << "%" << endl;
-            testOutFile << "Weighted value col accuracy: " << 100*result.valScore << "%" << endl;
-            testOutFile << "Column estimation difference (actual - expected): " << result.colDiff << endl;
+            testOutFile << endl;
+            testOutFile << "** Ground truth table: **" << endl;
+            testOutFile << endl;
+            testOutFile << trueTable.printableString(25) << endl;
+            testOutFile << endl;
+            testOutFile << "Comparison test scores:" << endl;
+            testOutFile << "Average key column accuracy:                        " << 100*result.keyScore << "%" << endl;
+            testOutFile << "Weighted value column accuracy:                     " << 100*result.valScore << "%" << endl;
+            testOutFile << "Difference in columns estimated (estimate - true):  " << result.colDiff << endl;
             testOutFile.close();
         } else {
             fprintf(stderr, "Could not write to test output file");
