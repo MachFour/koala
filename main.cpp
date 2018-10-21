@@ -1,4 +1,4 @@
-#include "reference.h"
+#include "tableExtract.h"
 #include "helpers.h"
 #include "ocrutils.h"
 #include "InputParser.h"
@@ -46,20 +46,11 @@ std::string exec(const char * cmd) {
 }
 */
 
-void testMain() {
-    std::string filePath("est-images/output//home/max/uni/thesis/label-pics-cropped/img_2557.txt");
-    std::string fileString = readFile(filePath);
-    printf("Read string: %s\n", fileString.c_str());
-    Table t = Table::parseFromString(fileString, "\\");
-    std::cout << "Table:" << t.printableString(30) << std::endl;
-}
-
 static const char configPath[] = "/home/max/thesis/koala/data/tesseract.config";
 static const char dataPath[] = "/usr/share/tessdata/";
 
 
 int main(int argc, char ** argv) {
-    // TODO add option to suppress image display
     if (argc < 2 || argc > 7) {
         printf("Usage: %s <input.img> [-o <output prefix>] [-t <ground truth.txt>] [-v]\n", argv[0]);
         printf("Test output format: <filename>: <key col score> <value col score> <est. columns> <column discrepancy>\n");

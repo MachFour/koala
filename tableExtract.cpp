@@ -2,7 +2,7 @@
 // Created by max on 9/11/18.
 //
 
-#include "reference.h"
+#include "tableExtract.h"
 #include "meanshift.h"
 #include "Interval.h"
 #include "ccomponent.h"
@@ -272,11 +272,12 @@ static cv::Mat preprocess(const cv::Mat& grey8, vector<progressImg>& progressIma
     using cv::Mat;
 
     // do dumb threshold to figure out whether it's white on black or black on white text, and invert if necessary
-    Mat whiteOnBlack = isWhiteTextOnBlack(grey8) ? grey8 : invert(grey8);
+    Mat whiteOnBlack = isWhiteTextOnBlack(grey8, progressImages) ? grey8 : invert(grey8);
+    progressImages.emplace_back(whiteOnBlack, "whiteOnBlack");
 
     const auto openingKsize = std::max(whiteOnBlack.rows, whiteOnBlack.cols)/30;
     const Mat sElement = structuringElement(openingKsize, cv::MORPH_RECT);
-    Mat textEnhanced = textEnhance(whiteOnBlack, sElement, false);
+    Mat textEnhanced = textEnhance(whiteOnBlack, sElement, false, progressImages);
 
 
     Mat vLines;
@@ -311,8 +312,8 @@ static cv::Mat preprocess(const cv::Mat& grey8, vector<progressImg>& progressIma
     {
         progressImages.emplace_back(progressImg{grey8, "image"});
         progressImages.emplace_back(progressImg{textEnhanced, "textEnhanced"});
-        //progressImages.emplace_back(progressImg{hLines, "hlines"});
-        //progressImages.emplace_back(progressImg{vLines, "vlines"});
+        progressImages.emplace_back(progressImg{hLines, "horizontal lines"});
+        progressImages.emplace_back(progressImg{vLines, "vertical lines"});
         progressImages.emplace_back(progressImg{preprocessed, "preprocessed"});
     }
 

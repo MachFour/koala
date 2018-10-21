@@ -55,7 +55,7 @@ comparisonResult compareTable(const Table& actual, const Table& expected) {
             for (auto j = s0; j < rowsE; ++j) {
                 auto strActual = actual.textAt(i, 0);
                 auto strExpected = expected.textAt(j, 0);
-                scoresForKeyI.at(j) = stringSimilarity(strActual, strExpected);
+                scoresForKeyI.at(j) = levenshteinSimilarity(strActual, strExpected);
                 matchings.emplace_back(idxPair{i, j});
             }
             matchScore.push_back(scoresForKeyI);
@@ -113,7 +113,7 @@ comparisonResult compareTable(const Table& actual, const Table& expected) {
             if (columnsToDivideBy != 0) {
                 // off by 1 because the key column is the first one
                 for (auto j = s0 + 1; j < numColumnsToCompare + 1; ++j) {
-                    auto score = stringSimilarity(cellsA.at(j), cellsE.at(j));
+                    auto score = levenshteinSimilarity(cellsA.at(j), cellsE.at(j));
                     valueScore.at(r) += score / columnsToDivideBy;
                 }
             } else {

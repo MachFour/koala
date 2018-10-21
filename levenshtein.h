@@ -110,4 +110,24 @@ double asymStringSimilarity(const std::string &a, const std::string &b) {
 	}
 }
 
+/*
+ * Taken from Definition 3 of
+ * "A Normalized Levenshtein Distance Metric"
+ * Li Yujian and Liu Bo
+ * IEEE TRANSACTIONS ON PATTERN ANALYSIS AND MACHINE INTELLIGENCE
+ */
+double levenshteinSimilarity(const std::string &a, const std::string &b) {
+	if (a.empty() && b.empty()) {
+		return 1.0;
+	} else if (a.empty() || b.empty()) {
+		return 0.0;
+	} else {
+	    auto ld = levenshtein(a, b);
+	    auto sumLengths = a.size() + b.size();
+	    //return 1.0 - 2.0*ld / (a.size() + b.size() + ld);
+		return (double) (sumLengths - ld) / (sumLengths + ld);
+	}
+
+}
+
 #endif // LEVENSHTEIN_H

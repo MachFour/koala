@@ -122,23 +122,25 @@ int maxVal(int matDepth) {
 
 // do dumb threshold to figure out whether it's white on black or black on white text, and invert if necessary
 // assumes that there is actually a clear majority of one over the other (i.e many more background pixels than foreground)
-bool isWhiteTextOnBlack(const Mat& m) {
+
+bool isWhiteTextOnBlack(const Mat& m, std::vector<progressImg>& progressImages) {
     if (m.depth() != CV_8U) {
         throw std::invalid_argument("matrix must be CV_8U");
     }
     Mat equalized;
     cv::equalizeHist(m, equalized);
-    //showImage(dumbThreshold);
+    progressImages.emplace_back(progressImg{equalized, "equalized"});
 
     Mat blurred;
     cv::medianBlur(equalized, blurred, 11);
+    progressImages.emplace_back(progressImg{blurred, "blurred"});
 
 
     Mat thresholded;
     //cv::threshold(thresholded, thresholded, 0, 255, cv::THRESH_OTSU);
     cv::adaptiveThreshold(blurred, thresholded, 255, CV_ADAPTIVE_THRESH_MEAN_C, CV_THRESH_BINARY, 399, 0);
 
-    //showImage(dumbThreshold);
+    progressImages.emplace_back(progressImg{thresholded, "thresholded"});
     // if nonzero pixels make up less than half the area of the image, it's probably white on black text
     return cv::countNonZero(thresholded) < m.rows * m.cols / 2;
 }

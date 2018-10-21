@@ -16,8 +16,8 @@ set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -D_DEBUG")
 find_package(OpenCV REQUIRED core highgui imgproc imgcodecs plot ml)
 #find_package(Tesseract REQUIRED)
 add_executable(koala
-        main.cpp meanshift.cpp Interval.cpp helpers.cpp randomColour.cpp plotutils.cpp reference.cpp ocrutils.cpp InputParser.cpp table.cpp
-        meanshift.h reference.h Interval.h wordBB.h randomColour.h plotutils.h table.h helpers.h ocrutils.h levenshtein.h InputParser.h
+        main.cpp meanshift.cpp Interval.cpp helpers.cpp randomColour.cpp plotutils.cpp tableExtract.cpp ocrutils.cpp InputParser.cpp table.cpp
+        meanshift.h tableExtract.h Interval.h wordBB.h randomColour.h plotutils.h table.h helpers.h ocrutils.h levenshtein.h InputParser.h
         tableComparison.cpp tableComparison.h matutils.cpp matutils.h wordBB.cpp IntervalGroup.tpp)
 
 

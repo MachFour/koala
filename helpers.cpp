@@ -2,7 +2,7 @@
 // Created by max on 8/3/18.
 //
 
-#include "reference.h"
+#include "tableExtract.h"
 #include "ccomponent.h"
 #include "Interval.h"
 #include "randomColour.h"
@@ -76,7 +76,7 @@ Mat drawCentroidClusters(const Mat& image, const vector<ccCluster>& clustersByCe
 }
 
 // input must be either CV_8U, CV_32F or CV_64F
-cv::Mat textEnhance(const Mat& whiteOnBlack, const Mat& structuringElement, bool doDivide) {
+cv::Mat textEnhance(const Mat& whiteOnBlack, const Mat& structuringElement, bool doDivide, std::vector<progressImg>& progressImages) {
     Mat background;
     Mat unnormalised;
     if (doDivide) {
@@ -95,22 +95,22 @@ cv::Mat textEnhance(const Mat& whiteOnBlack, const Mat& structuringElement, bool
         } else {
             cv::divide(blackOnWhite, lightBackground, tmp);
         }
+        background = lightBackground;
         unnormalised = invert(tmp);
     } else {
         Mat darkBackground;
         cv::morphologyEx(whiteOnBlack, darkBackground, cv::MorphTypes::MORPH_OPEN, structuringElement);
         cv::subtract(whiteOnBlack, darkBackground, unnormalised);
+        background = darkBackground;
     }
     // output bitness is same as input
     auto outDepth = whiteOnBlack.depth();
 
     Mat normalised;
     cv::normalize(unnormalised, normalised, 0, maxVal(outDepth), cv::NORM_MINMAX, outDepth);
-    /*
-    showImage(background, "background");
-    showImage(unnormalised, "unnormalised");
-    showImage(normalised, "normalised");
-    */
+    progressImages.emplace_back(progressImg{background, "background"});
+    progressImages.emplace_back(progressImg{unnormalised, "enhanced-unnormalised"});
+    progressImages.emplace_back(progressImg{normalised, "enhanced-normalised"});
 
     return normalised;
 }

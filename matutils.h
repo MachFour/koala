@@ -21,7 +21,9 @@ cv::Mat structuringElement(int size, cv::MorphShapes shape);
 cv::Mat structuringElement(int width, int height, cv::MorphShapes shape);
 
 
-bool isWhiteTextOnBlack(const cv::Mat& m);
+// pair of Mat and title
+using progressImg = std::pair<cv::Mat, std::string>;
+bool isWhiteTextOnBlack(const cv::Mat& m, std::vector<progressImg>& progressImages);
 
 
 std::string type2str(int type);

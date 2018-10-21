@@ -36,7 +36,8 @@ cv::Mat overlayWords(const cv::Mat &image, const std::vector<wordBB> &allWordBBs
  *  2. divide the input image by the result of the closing
  * The output image always has white on black text, like the input
  */
-cv::Mat textEnhance(const cv::Mat& whiteOnBlack, const cv::Mat& structuringElement, bool doDivide);
+using progressImg = std::pair<cv::Mat, std::string>;
+cv::Mat textEnhance(const cv::Mat& whiteOnBlack, const cv::Mat& structuringElement, bool doDivide, std::vector<progressImg>&);
 
 std::string readFile(const std::string &filename);
 std::string basename(std::string filename, bool removeExtension=false);
