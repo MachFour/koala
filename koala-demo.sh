@@ -23,33 +23,39 @@ function welcome_message() {
 	echo
 }
 
-clear
-welcome_message
-echo
-echo -n "Please choose an image by typing a number between 1 and 55: "
-
-read
-NUMBER="$REPLY"
-clear
-
-IMAGE_FILE="${DATASET_PATH}/${NUMBER}.jpg"
-GROUND_TRUTH_FILE="${DATASET_PATH}/${NUMBER}.txt"
-if [[ "${NUMBER}" -ge 1 && "${NUMBER}" -le 55 ]]; then
-	echo
-	#echo image file: $IMAGE_FILE
-	#echo ground truth file: $GROUND_TRUTH_FILE
-	#${KOALA_BIN}
-	echo "Running algorithm, please wait..."
-	${KOALA_BIN} "$IMAGE_FILE" -t "$GROUND_TRUTH_FILE" -o "${OUTDIR}/${NUMBER}" -v > /dev/null
+function run() {
 	clear
-	echo "Results:"
-	cat "${OUTDIR}/${NUMBER}.test"
-else
+	welcome_message
 	echo
-	echo -n "Sorry, I couldn't understand '$NUMBER'. "
-	echo "The number needs to be between 1 and 55."
-fi
+	echo -n "Please choose an image by typing a number between 1 and 55: "
 
-echo
-echo "Press any key to restart..."
-read -n 1
+	read
+	NUMBER="$REPLY"
+	clear
+
+	IMAGE_FILE="${DATASET_PATH}/${NUMBER}.jpg"
+	GROUND_TRUTH_FILE="${DATASET_PATH}/${NUMBER}.txt"
+	if [[ "${NUMBER}" -ge 1 && "${NUMBER}" -le 55 ]]; then
+		echo
+		#echo image file: $IMAGE_FILE
+		#echo ground truth file: $GROUND_TRUTH_FILE
+		#${KOALA_BIN}
+		echo "Running algorithm, please wait..."
+		${KOALA_BIN} "$IMAGE_FILE" -t "$GROUND_TRUTH_FILE" -o "${OUTDIR}/${NUMBER}" -v > /dev/null
+		clear
+		echo "Results:"
+		cat "${OUTDIR}/${NUMBER}.test"
+	else
+		echo
+		echo -n "Sorry, I couldn't understand '$NUMBER'. "
+		echo "The number needs to be between 1 and 55."
+	fi
+
+	echo
+	echo "Press any key to restart..."
+	read -n 1
+}
+
+while true; do
+	run
+done
