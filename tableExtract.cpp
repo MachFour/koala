@@ -8,8 +8,9 @@
 #include "ccomponent.h"
 #include "plotutils.h"
 #include "table.h"
-#include "helpers.h"
+#include "drawingutils.h"
 #include "matutils.h"
+#include "preprocessing.h"
 #include "ocrutils.h"
 #include "wordBB.h"
 
@@ -111,7 +112,6 @@ static bool isPlausibleWordBBSize(const wordBB& w, int imgW, int imgH) {
 /*
  * Stages of main processing
  */
-static Mat preprocess(const Mat&, vector<progressImg>&);
 static vector<vector<wordBB>> findWords(const Mat&, vector<progressImg>&);
 static int estimateNumberOfColumns(const vector<wordBB>& wordBBs, int width, const Mat& rects, vector<progressImg>&);
 static void classifyColumns(std::vector<wordBB>&, int, const Mat& rects, vector<progressImg>&, bool);
@@ -267,58 +267,6 @@ Table tableExtract(const Mat &image, tesseract::TessBaseAPI& tesseractAPI, vecto
     // TODO Contour / line detection
     //showImage(binarised);
     return t;
-}
-static cv::Mat preprocess(const cv::Mat& grey8, vector<progressImg>& progressImages) {
-    using cv::Mat;
-
-    // do dumb threshold to figure out whether it's white on black or black on white text, and invert if necessary
-    Mat whiteOnBlack = isWhiteTextOnBlack(grey8, progressImages) ? grey8 : invert(grey8);
-    progressImages.emplace_back(whiteOnBlack, "whiteOnBlack");
-
-    const auto openingKsize = std::max(whiteOnBlack.rows, whiteOnBlack.cols)/30;
-    const Mat sElement = structuringElement(openingKsize, cv::MORPH_RECT);
-    Mat textEnhanced = textEnhance(whiteOnBlack, sElement, false, progressImages);
-
-
-    Mat vLines;
-    Mat hLines;
-    // detect large horizontal and vertical lines
-    cv::morphologyEx(textEnhanced, hLines, cv::MorphTypes::MORPH_OPEN, structuringElement(250, 5, cv::MORPH_RECT));
-    cv::morphologyEx(textEnhanced, vLines, cv::MorphTypes::MORPH_OPEN, structuringElement(5, 250, cv::MORPH_RECT));
-
-    //Mat opened;
-    //cv::morphologyEx(linesRemoved, opened, cv::MorphTypes::MORPH_OPEN, structuringElement(12, 12, cv::MORPH_ELLIPSE));
-
-    // (gaussian) blur -> matches vision character
-    // before doing the morphological operation - makes intensities more uniform in th
-    // don't use the binarised (or blurred) image for OCR (don't throw away)
-    // histogram of gradients
-
-    //clean it up a bit?
-    // shapes: MORPH_RECT, MORPH_CROSS, MORPH_ELLIPSE
-    //cv::morphologyEx(preprocessed, preprocessed, cv::MorphTypes::MORPH_ERODE, structuringElement(2, cv::MORPH_ELLIPSE));
-    //cv::morphologyEx(preprocessed, preprocessed, cv::MorphTypes::MORPH_OPEN, structuringElement(1, 7, cv::MORPH_RECT));
-
-    //int C = 0; // constant subtracted from calculated threshold value to obtain T(x, y)
-    //cv::adaptiveThreshold(open, binarised, 255, CV_ADAPTIVE_THRESH_MEAN_C, CV_THRESH_BINARY, 399, C);
-    //cv::morphologyEx(binarised, binarised, cv::MorphTypes::MORPH_OPEN, structuringElement(2, cv::MORPH_ELLIPSE));
-    //cv::threshold(hLines, hLinesBin, 0, 255, cv::THRESH_TOZERO | cv::THRESH_OTSU);
-    //cv::threshold(vLines, vLinesBin, 0, 255, cv::THRESH_TOZERO | cv::THRESH_OTSU);
-
-    // remove lines
-    Mat preprocessed;
-    cv::subtract(textEnhanced, hLines, preprocessed, cv::noArray(), CV_8U);
-    cv::subtract(preprocessed, vLines, preprocessed, cv::noArray(), CV_8U);
-    {
-        progressImages.emplace_back(progressImg{grey8, "image"});
-        progressImages.emplace_back(progressImg{textEnhanced, "textEnhanced"});
-        progressImages.emplace_back(progressImg{hLines, "horizontal lines"});
-        progressImages.emplace_back(progressImg{vLines, "vertical lines"});
-        progressImages.emplace_back(progressImg{preprocessed, "preprocessed"});
-    }
-
-    return preprocessed;
-
 }
 
 /*

@@ -11,6 +11,7 @@
 
 #include <string>
 #include <stdexcept>
+#include <algorithm>
 
 using std::string;
 using cv::Mat;
@@ -38,14 +39,73 @@ std::string type2str(int type) {
     return r;
 }
 
-Mat structuringElement(int size, cv::MorphShapes shape) {
-    // point (-1, -1) represents centred structuring element
-    return structuringElement(size, size, shape);
+Mat eightBitToFloat(const Mat& input, bool rescale, bool doublePrecision) {
+    if (input.depth() != CV_8U) {
+        throw std::invalid_argument("Mat is not CV_8U");
+    }
+    Mat ret;
+    input.convertTo(ret, doublePrecision ? CV_64F : CV_32F, rescale ? 1.0/255 : 1);
+    return ret;
 }
 
-Mat structuringElement(int width, int height, cv::MorphShapes shape) {
-    // point (-1, -1) represents centred structuring element
-    return getStructuringElement(shape, cv::Size(width, height) /*, cv::point anchor = cv::point(-1, -1) */);
+Mat floatToEightBit(const Mat& input, bool rescale) {
+    if (input.depth() != CV_32F && input.depth() != CV_64F) {
+        throw std::invalid_argument("Mat is not CV_32F or CV_64F");
+    }
+    Mat ret;
+    input.convertTo(ret, CV_8U, rescale ? 255 : 1);
+    return ret;
+}
+
+
+Mat invert(const Mat& input) {
+    switch (input.depth()) {
+        case CV_8U:
+            return 255 - input;
+        case CV_64F:
+            return 1.0 - input;
+        case CV_32F:
+            return 1.0f - input;
+        default:
+            throw std::invalid_argument("Unsupported Mat type");
+    }
+}
+
+/*
+ * Maximum value of a particular matrix type
+ */
+int maxVal(int matDepth) {
+    switch (matDepth) {
+        case CV_8U:
+            return 255;
+        case CV_32F:
+            /* fall through */
+        case CV_64F:
+            return 1;
+        case CV_32S:
+            return std::numeric_limits<int>::max();
+        default:
+            throw std::invalid_argument("Unrecognised Mat depth");
+    }
+
+}
+
+int findMedian(std::vector<int> numbers) {
+    auto n = numbers.size();
+    if (n <= 0) {
+        return 0;
+    }
+    sort(numbers.begin(), numbers.end());
+
+    if (n % 2 == 1) {
+        // n == 5 -> return numbers[2]
+        return numbers[(n - 1) / 2];
+    } else {
+        // n == 6 -> return round(numbers[2] + numbers[3])/2
+        int smallerMedian = numbers[n/2 - 1];
+        int largerMedian = numbers[n/2];
+        return static_cast<int>(round((smallerMedian + largerMedian)/2.0));
+    }
 }
 
 void showImage(const Mat& img, const std::string& title) {
@@ -73,77 +133,7 @@ Mat derivative(const Mat& src) {
     return deriv;
 }
 
-Mat invert(const Mat& input) {
-    switch (input.depth()) {
-        case CV_8U:
-            return 255 - input;
-        case CV_64F:
-            return 1.0 - input;
-        case CV_32F:
-            return 1.0f - input;
-        default:
-            throw std::invalid_argument("Unsupported Mat type");
-    }
-}
 
-Mat eightBitToFloat(const Mat& input, bool rescale, bool doublePrecision) {
-    if (input.depth() != CV_8U) {
-        throw std::invalid_argument("Mat is not CV_8U");
-    }
-    Mat ret;
-    input.convertTo(ret, doublePrecision ? CV_64F : CV_32F, rescale ? 1.0/255 : 1);
-    return ret;
-}
-
-Mat floatToEightBit(const Mat& input, bool rescale) {
-    if (input.depth() != CV_32F && input.depth() != CV_64F) {
-        throw std::invalid_argument("Mat is not CV_32F or CV_64F");
-    }
-    Mat ret;
-    input.convertTo(ret, CV_8U, rescale ? 255 : 1);
-    return ret;
-}
-
-int maxVal(int matDepth) {
-    switch (matDepth) {
-        case CV_8U:
-            return 255;
-        case CV_32F:
-            /* fall through */
-        case CV_64F:
-            return 1;
-        case CV_32S:
-            return std::numeric_limits<int>::max();
-        default:
-            throw std::invalid_argument("Unrecognised Mat depth");
-    }
-
-}
-
-// do dumb threshold to figure out whether it's white on black or black on white text, and invert if necessary
-// assumes that there is actually a clear majority of one over the other (i.e many more background pixels than foreground)
-
-bool isWhiteTextOnBlack(const Mat& m, std::vector<progressImg>& progressImages) {
-    if (m.depth() != CV_8U) {
-        throw std::invalid_argument("matrix must be CV_8U");
-    }
-    Mat equalized;
-    cv::equalizeHist(m, equalized);
-    progressImages.emplace_back(progressImg{equalized, "equalized"});
-
-    Mat blurred;
-    cv::medianBlur(equalized, blurred, 11);
-    progressImages.emplace_back(progressImg{blurred, "blurred"});
-
-
-    Mat thresholded;
-    //cv::threshold(thresholded, thresholded, 0, 255, cv::THRESH_OTSU);
-    cv::adaptiveThreshold(blurred, thresholded, 255, CV_ADAPTIVE_THRESH_MEAN_C, CV_THRESH_BINARY, 399, 0);
-
-    progressImages.emplace_back(progressImg{thresholded, "thresholded"});
-    // if nonzero pixels make up less than half the area of the image, it's probably white on black text
-    return cv::countNonZero(thresholded) < m.rows * m.cols / 2;
-}
 
 int saveImage(const Mat &img, const char *outFile) {
     bool result = false;

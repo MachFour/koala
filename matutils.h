@@ -13,17 +13,11 @@
 cv::Mat floatToEightBit(const cv::Mat& input, bool rescale=true);
 cv::Mat eightBitToFloat(const cv::Mat& input, bool rescale=true, bool doublePrecision=true);
 cv::Mat invert(const cv::Mat& input);
-
 int maxVal(int matDepth);
 
+
+int findMedian(std::vector<int> numbers);
 cv::Mat derivative(const cv::Mat& src);
-cv::Mat structuringElement(int size, cv::MorphShapes shape);
-cv::Mat structuringElement(int width, int height, cv::MorphShapes shape);
-
-
-// pair of Mat and title
-using progressImg = std::pair<cv::Mat, std::string>;
-bool isWhiteTextOnBlack(const cv::Mat& m, std::vector<progressImg>& progressImages);
 
 
 std::string type2str(int type);

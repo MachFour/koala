@@ -4,7 +4,8 @@
 
 #include "tableComparison.h"
 #include "table.h"
-#include "helpers.h"
+#include "fileutils.h"
+#include "drawingutils.h"
 #include "levenshtein.h"
 
 #include <algorithm>

@@ -1,8 +1,10 @@
 #include "tableExtract.h"
-#include "helpers.h"
+#include "drawingutils.h"
 #include "ocrutils.h"
 #include "InputParser.h"
 #include "tableComparison.h"
+#include "fileutils.h"
+#include "matutils.h"
 
 #include <iostream>
 #include <cstdio>
