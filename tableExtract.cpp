@@ -224,27 +224,33 @@ Table tableExtract(const Mat &image, tesseract::TessBaseAPI& tesseractAPI, vecto
     vector<wordBB> combinedWordBBs;
     {
         vector<wordBB> wordsInCurrentCell;
-        bool firstWord = true;
         int currentRow = 0;
         int currentColumn = 0;
-        for (const wordBB &w : allWordBBs) {
-            if (w.row() != currentRow || w.col() != currentColumn || firstWord) {
-                if (firstWord) {
-                    firstWord = false;
-                } else {
-                    auto combined = wordBB::combineAll(wordsInCurrentCell);
-                    combined.expandMinOf(10, 0.2);
-                    combined.constrain(0, 0, image.cols, image.rows);
-                    combined.setCol(currentColumn);
-                    combined.setRow(currentRow);
-                    combinedWordBBs.push_back(combined);
+        for (size_t i = 0; i < allWordBBs.size(); ++i) {
+            const wordBB &w = allWordBBs.at(i);
+            bool rowChange = (w.row() != currentRow || w.col() != currentColumn);
+            // never save empty row on first iteration
+            bool saveAndClear = (rowChange && i != 0) || i == allWordBBs.size() - 1;
+
+            if (saveAndClear) {
+                // always save on last iteration
+                if (i == allWordBBs.size() - 1) {
+                    wordsInCurrentCell.push_back(w);
                 }
+                auto combined = wordBB::combineAll(wordsInCurrentCell);
+                combined.expandMinOf(10, 0.2);
+                combined.constrain(0, 0, image.cols, image.rows);
+                combined.setCol(currentColumn);
+                combined.setRow(currentRow);
+                combinedWordBBs.push_back(combined);
                 // start new cell;
                 wordsInCurrentCell.clear();
-                wordsInCurrentCell.push_back(w);
-                currentRow = w.row();
-                currentColumn = w.col();
-            } else {
+            }
+
+            currentRow = w.row();
+            currentColumn = w.col();
+
+            if (i != allWordBBs.size() - 1) {
                 wordsInCurrentCell.push_back(w);
             }
         }
