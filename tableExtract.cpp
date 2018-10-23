@@ -223,36 +223,29 @@ Table tableExtract(const Mat &image, tesseract::TessBaseAPI& tesseractAPI, vecto
 
     vector<wordBB> combinedWordBBs;
     {
-        vector<wordBB> wordsInCurrentCell;
-        int currentRow = 0;
-        int currentColumn = 0;
         for (size_t i = 0; i < allWordBBs.size(); ++i) {
+            vector<wordBB> wordsInCurrentCell;
             const wordBB &w = allWordBBs.at(i);
-            bool rowChange = (w.row() != currentRow || w.col() != currentColumn);
-            // never save empty row on first iteration
-            bool saveAndClear = (rowChange && i != 0) || i == allWordBBs.size() - 1;
-
-            if (saveAndClear) {
-                // always save on last iteration
-                if (i == allWordBBs.size() - 1) {
-                    wordsInCurrentCell.push_back(w);
+            // find how many to add
+            size_t j = i;
+            for (; j < allWordBBs.size(); ++j) {
+                const wordBB& v = allWordBBs.at(j);
+                if (v.row() == w.row() && v.col() == w.col()) {
+                    // j is in the group (note we always add i in the first iteration)
+                    wordsInCurrentCell.push_back(v);
+                } else {
+                    // left the group
+                    break;
                 }
-                auto combined = wordBB::combineAll(wordsInCurrentCell);
-                combined.expandMinOf(10, 0.2);
-                combined.constrain(0, 0, image.cols, image.rows);
-                combined.setCol(currentColumn);
-                combined.setRow(currentRow);
-                combinedWordBBs.push_back(combined);
-                // start new cell;
-                wordsInCurrentCell.clear();
             }
-
-            currentRow = w.row();
-            currentColumn = w.col();
-
-            if (i != allWordBBs.size() - 1) {
-                wordsInCurrentCell.push_back(w);
-            }
+            auto combined = wordBB::combineAll(wordsInCurrentCell);
+            combined.expandMinOf(10, 0.2);
+            combined.constrain(0, 0, image.cols, image.rows);
+            combined.setCol(w.col());
+            combined.setRow(w.row());
+            combinedWordBBs.push_back(combined);
+            // j is the first one outside the group, set i to be equal to j after the loop update
+            i = j - 1;
         }
     }
 
